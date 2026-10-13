@@ -75,6 +75,7 @@ func newScanCmd() *cobra.Command {
 		Short: "Scan source / repo (PRD M0)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			runStart := time.Now()
 			root := "."
 			if len(args) == 1 {
 				root = args[0]
@@ -341,6 +342,9 @@ func newScanCmd() *cobra.Command {
 				sf.Close()
 				logger.Info("sbom ditulis", "file", sbomOut, "packages", len(res.Dependencies))
 			}
+
+			// Total wall time includes OSV/adapters/plugins/AI (not just core scan).
+			res.DurationMs = time.Since(runStart).Milliseconds()
 
 			w := os.Stdout
 			var f *os.File
