@@ -35,15 +35,16 @@ func LoadFile(path string) (*Rule, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseRule(data)
+}
+
+// ParseRule parses rule YAML bytes into a *Rule.
+func ParseRule(data []byte) (*Rule, error) {
 	var yr yamlRule
 	if err := yaml.Unmarshal(data, &yr); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
 	}
-	r, err := yr.toRule()
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return r, nil
+	return yr.toRule()
 }
 
 // LoadPaths loads rules from files and/or directories (sorted for determinism).
@@ -164,6 +165,9 @@ func parseLanguage(s string) model.Language {
 		return model.LanguageUnknown
 	}
 }
+
+// Language maps a language name to its model constant (public for the web lab).
+func Language(s string) model.Language { return parseLanguage(s) }
 
 func isKnownCategory(c model.Category) bool {
 	for _, k := range model.AllCategories {

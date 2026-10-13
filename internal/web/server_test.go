@@ -97,3 +97,40 @@ func newReq(method, path, body string) *http.Request {
 	req, _ := http.NewRequest(method, path, strings.NewReader(body))
 	return req
 }
+
+func TestRuleLab(t *testing.T) {
+	app := testApp(t, t.TempDir(), filepath.Join(t.TempDir(), "b.json"))
+	body := `{"yaml":"id: LAB-1\ncategory: security\nseverity: high\nmatch: {kind: regex, pattern: 'os\\.system'}\nlanguages: [python]","language":"python","code":"import os\nos.system(cmd)\n"}`
+	req := newReq(http.MethodPost, "/api/rules/test", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out["rule_id"] != "LAB-1" {
+		t.Errorf("rule_id = %v", out["rule_id"])
+	}
+	matches, ok := out["matches"].([]any)
+	if !ok || len(matches) != 1 {
+		t.Errorf("want 1 match, got %v", out["matches"])
+	}
+}
+
+func TestRuleLabInvalid(t *testing.T) {
+	app := testApp(t, t.TempDir(), filepath.Join(t.TempDir(), "b.json"))
+	req := newReq(http.MethodPost, "/api/rules/test", `{"yaml":"bad"}`)
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := app.Test(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("invalid rule should 400, got %d", resp.StatusCode)
+	}
+}

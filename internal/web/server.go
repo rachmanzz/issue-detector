@@ -18,6 +18,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/history"
 	"github.com/rachmanzz/issue-detector/internal/model"
+	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
 )
 
@@ -62,6 +63,7 @@ func (s *Server) App() *fiber.App {
 	app.Get("/api/rules", s.handleRules)
 	app.Get("/api/trend", s.handleTrend)
 	app.Post("/api/triage", s.handleTriage)
+	app.Post("/api/rules/test", s.handleRuleLab)
 
 	return app
 }
@@ -195,6 +197,34 @@ func (s *Server) handleTriage(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(fiber.Map{"accepted": true, "persisted": true, "fingerprint": fp})
+}
+
+// handleRuleLab tests a rule YAML against a code snippet live (PRD §3.6 #7
+// rule lab). Rule is not persisted.
+func (s *Server) handleRuleLab(c fiber.Ctx) error {
+	var body struct {
+		YAML     string `json:"yaml"`
+		Language string `json:"language"`
+		Code     string `json:"code"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "body tidak valid")
+	}
+	rule, err := rules.ParseRule([]byte(body.YAML))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	f := &model.File{
+		RelPath: "lab", Language: rules.Language(body.Language),
+		Lines: strings.Split(body.Code, "\n"),
+	}
+	matches, err := rule.Matcher.Match(c.Context(), f)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(fiber.Map{
+		"rule_id": rule.ID, "severity": rule.Severity, "matches": matches,
+	})
 }
 
 // filterFindings applies query filters: severity_min, category, source, in_diff.
