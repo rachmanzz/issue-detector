@@ -1,0 +1,33 @@
+name: self-scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build -o issue-detector ./cmd/issue-detector
+
+      - name: Self-scan (harus bersih terhadap baseline)
+        run: >
+          ./issue-detector scan . --no-deps --no-adapters
+          --ignore internal/testdata/**
+          --baseline .issue-detector-selfscan-baseline.json
+          --fail-on high
+
+      - name: Regenerasi baseline bila ada temuan baru (manual)
+        if: failure()
+        run: |
+          echo "Ada temuan baru di atas baseline. Regenerasi:"
+          echo "  ./issue-detector baseline . -o .issue-detector-selfscan-baseline.json --ignore internal/testdata/** --no-deps --no-adapters"
+          echo "Review fingerprint lalu commit baseline baru."

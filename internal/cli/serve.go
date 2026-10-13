@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"log/slog"
+	"net"
 	"os"
 
 	"github.com/rachmanzz/issue-detector/internal/config"
@@ -20,16 +22,25 @@ func newServeCmd() *cobra.Command {
 		baseline string
 		noGit    bool
 		mcpOn    bool
+		uiToken  string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Mode Web long-running (UI + API + MCP) — PRD §3.6/§3.7",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Reject binding beyond localhost without a token (roast v11).
+			if uiToken == "" && !isLoopback(host) {
+				return errors.New("serve: bind di luar localhost wajib --ui-token")
+			}
+			if isLoopback(host) && uiToken == "" {
+				slog.Warn("serve: tanpa --ui-token; hanya bind localhost (aman)")
+			}
 			cfg := config.Default()
 			cfg.NoGit = noGit
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 			opts := web.Options{
-				Root: root, Config: cfg, HistoryPath: history, BaselinePath: baseline, Log: logger,
+				Root: root, Config: cfg, HistoryPath: history, BaselinePath: baseline,
+				Token: uiToken, Log: logger,
 			}
 			if mcpOn {
 				opts.MCP = &mcp.Server{
@@ -48,5 +59,14 @@ func newServeCmd() *cobra.Command {
 	fl.StringVar(&baseline, "baseline", DefaultBaselineFile, "path baseline (untuk triage)")
 	fl.BoolVar(&noGit, "no-git", false, "lewati analisis kesehatan git")
 	fl.BoolVar(&mcpOn, "mcp", false, "ekspos MCP http transport di POST /mcp")
+	fl.StringVar(&uiToken, "ui-token", "", "token auth untuk semua endpoint (/api/*, /mcp)")
 	return cmd
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

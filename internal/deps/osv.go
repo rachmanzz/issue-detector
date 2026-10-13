@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -221,35 +222,110 @@ func osvSeverity(v osvVuln) model.Severity {
 	case "LOW":
 		return model.SeverityLow
 	}
-	// Fall back to a CVSS base score if present in the score vector's trailing metric.
+	// Prefer an explicit CVSS base score computed from the vector.
+	var best float64
 	for _, s := range v.Severity {
-		if score := cvssBase(s.Score); score > 0 {
-			switch {
-			case score >= 9.0:
-				return model.SeverityCritical
-			case score >= 7.0:
-				return model.SeverityHigh
-			case score >= 4.0:
-				return model.SeverityMedium
-			default:
-				return model.SeverityLow
-			}
+		score, ok := cvssScore(s.Score)
+		if ok && score > best {
+			best = score
+		}
+	}
+	if best > 0 {
+		switch {
+		case best >= 9.0:
+			return model.SeverityCritical
+		case best >= 7.0:
+			return model.SeverityHigh
+		case best >= 4.0:
+			return model.SeverityMedium
+		default:
+			return model.SeverityLow
 		}
 	}
 	return model.SeverityMedium
 }
 
-// cvssBase extracts the trailing base score from a CVSS vector (e.g. ".../AV:N/..."), if present.
-func cvssBase(score string) float64 {
-	if !strings.HasPrefix(score, "CVSS:") {
-		return 0
+// cvssScore computes the CVSS v3.x base score from a vector, e.g.
+// "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H". Returns ok=false when the
+// vector is not a parseable CVSS v3 vector.
+func cvssScore(vector string) (float64, bool) {
+	vec := strings.TrimSpace(vector)
+	i := strings.Index(vec, "CVSS:")
+	if i < 0 {
+		return 0, false
 	}
-	// OSV sometimes embeds the numeric score after the vector in parentheses.
-	if i := strings.LastIndex(score, "("); i >= 0 {
-		var f float64
-		if _, err := fmt.Sscanf(score[i+1:], "%f", &f); err == nil {
-			return f
+	rest := vec[i+len("CVSS:"):]
+	rest = strings.TrimPrefix(rest, "3.1/")
+	rest = strings.TrimPrefix(rest, "3.0/")
+	if rest == "" || rest[0] == '4' {
+		return 0, false // only v3 parity implemented here
+	}
+	metrics := map[string]string{}
+	for _, part := range strings.Split(rest, "/") {
+		idx := strings.IndexByte(part, ':')
+		if idx < 1 || idx+1 >= len(part) {
+			continue
+		}
+		key, val := part[:idx], part[idx+1:idx+2]
+		switch key {
+		case "AV", "AC", "PR", "UI":
+			metrics[key] = val
+		default: // S, C, I, A
+			metrics[key[:1]] = val
 		}
 	}
-	return 0
+	scopeUp := metrics["S"] == "C"
+	av := map[string]float64{"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}[metrics["AV"]]
+	ac := map[string]float64{"L": 0.77, "H": 0.44}[metrics["AC"]]
+	ui := map[string]float64{"N": 0.85, "R": 0.62}[metrics["UI"]]
+	var pr float64
+	switch metrics["PR"] {
+	case "N":
+		pr = 0.85
+	case "L":
+		if scopeUp {
+			pr = 0.68
+		} else {
+			pr = 0.62
+		}
+	case "H":
+		if scopeUp {
+			pr = 0.50
+		} else {
+			pr = 0.27
+		}
+	}
+	ci := map[string]float64{"H": 0.56, "L": 0.22, "N": 0.0}[metrics["C"]]
+	ii := map[string]float64{"H": 0.56, "L": 0.22, "N": 0.0}[metrics["I"]]
+	ai := map[string]float64{"H": 0.56, "L": 0.22, "N": 0.0}[metrics["A"]]
+
+	iss := 1 - (1-ci)*(1-ii)*(1-ai)
+	var impact, exploitability float64
+	if scopeUp {
+		impact = 7.52*(iss-0.029) - 3.25*math.Pow(iss-0.02, 15)
+		exploitability = 8.22 * av * ac * pr * ui * 1.08
+	} else {
+		impact = 6.42 * iss
+		exploitability = 8.22 * av * ac * pr * ui
+	}
+	base := impact + exploitability
+	if scopeUp {
+		base *= 1.08
+	}
+	if base > 10 {
+		base = 10
+	}
+	if base < 0 {
+		base = 0
+	}
+	return roundUp(base), true
+}
+
+// roundUp rounds to one decimal, upward (CVSS rounding).
+func roundUp(v float64) float64 {
+	scaled := v * 10
+	if scaled > float64(int64(scaled)) {
+		scaled = float64(int64(scaled)) + 1
+	}
+	return scaled / 10
 }

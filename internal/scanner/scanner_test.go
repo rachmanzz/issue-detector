@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rachmanzz/issue-detector/internal/config"
@@ -122,20 +123,6 @@ func TestScannerFilterSeverityMin(t *testing.T) {
 	}
 }
 
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [16]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
-}
-
 // BenchmarkScan measures end-to-end pipeline throughput over a synthetic Go
 // tree (PRD §10: target >100k LOC under 30s).
 func BenchmarkScan(b *testing.B) {
@@ -162,6 +149,53 @@ func f%d() {
 	for i := 0; i < b.N; i++ {
 		if _, err := Scan(context.Background(), Options{Root: dir, Config: cfg}); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [16]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}
+
+// TestScanConcurrentSerialize guards roast v2: two parallel scans must both
+// complete (serialized over the process-global fiber-extras state) and stay
+// independent.
+func TestScanConcurrentSerialize(t *testing.T) {
+	dirA := writeFixture(t)
+	dirB := writeFixture(t)
+
+	var wg sync.WaitGroup
+	results := make([]*model.ScanResult, 2)
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			root := dirA
+			if i == 1 {
+				root = dirB
+			}
+			results[i], errs[i] = Scan(context.Background(), Options{Root: root, Config: config.Default()})
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 0; i < 2; i++ {
+		if errs[i] != nil {
+			t.Fatalf("scan %d gagal: %v", i, errs[i])
+		}
+		if results[i].Summary.FilesEnumerated != 5 {
+			t.Errorf("scan %d files = %d, want 5", i, results[i].Summary.FilesEnumerated)
 		}
 	}
 }

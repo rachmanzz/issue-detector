@@ -56,3 +56,18 @@ func TestFingerprintDistinguishes(t *testing.T) {
 		t.Error("different files must have different fingerprints")
 	}
 }
+
+// TestFingerprintFileLevelNoCollision guards roast v10: file-level findings
+// (empty snippet) must be distinguished by title/reference, not hash "".
+func TestFingerprintFileLevelNoCollision(t *testing.T) {
+	f1 := model.Finding{RuleID: "DEP-001", File: "go.mod", Title: "Vulnerable dependency: a", References: []string{"https://osv.dev/vulnerability/GHSA-1"}}
+	f2 := model.Finding{RuleID: "DEP-001", File: "go.mod", Title: "Vulnerable dependency: b", References: []string{"https://osv.dev/vulnerability/GHSA-2"}}
+	if Fingerprint(f1) == Fingerprint(f2) {
+		t.Error("distinct file-level findings must not collide")
+	}
+	// And they must not equal the old empty-string hash behaviour.
+	plain := Fingerprint(model.Finding{RuleID: "DEP-001", File: "go.mod"})
+	if Fingerprint(f1) == plain || Fingerprint(f2) == plain {
+		t.Error("file-level fingerprint must carry context")
+	}
+}

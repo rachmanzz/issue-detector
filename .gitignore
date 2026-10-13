@@ -21,3 +21,6 @@
 # Go
 *.test
 coverage.out
+
+# Intentional test fixtures (self-scan hygiene, roast v14)
+internal/testdata/

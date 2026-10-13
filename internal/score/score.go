@@ -12,29 +12,76 @@ import (
 )
 
 // categoryBonus weights categories by exploitability/urgency.
-var categoryBonus = map[model.Category]float64{
-	model.CategorySecrets:    10,
-	model.CategorySecurity:   8,
-	model.CategoryDependency: 6,
-	model.CategoryBug:        5,
-	model.CategoryPosture:    4,
-	model.CategoryGit:        3,
-	model.CategoryQuality:    2,
-	model.CategoryTodo:       1,
+func defaultCategoryBonus() map[model.Category]float64 {
+	return map[model.Category]float64{
+		model.CategorySecrets:    10,
+		model.CategorySecurity:   8,
+		model.CategoryDependency: 6,
+		model.CategoryBug:        5,
+		model.CategoryPosture:    4,
+		model.CategoryGit:        3,
+		model.CategoryQuality:    2,
+		model.CategoryTodo:       1,
+	}
+}
+
+// Weights are the tuneable priority-score coefficients (roast v9: no longer
+// undocumented constants). Zero fields fall back to the defaults.
+type Weights struct {
+	Severity   float64                    `yaml:"severity" json:"severity"`
+	Confidence float64                    `yaml:"confidence" json:"confidence"`
+	Category   map[model.Category]float64 `yaml:"category" json:"category"`
+	InDiff     float64                    `yaml:"in_diff" json:"in_diff"`
+	References float64                    `yaml:"references" json:"references"`
+}
+
+// DefaultWeights returns the recommended coefficients.
+func DefaultWeights() Weights {
+	return Weights{
+		Severity: 60, Confidence: 15, Category: defaultCategoryBonus(),
+		InDiff: 10, References: 5,
+	}
+}
+
+// defaults is the active coefficient set (tunable via config, roast v9).
+var defaults = DefaultWeights()
+
+// SetDefaults installs custom weights; zero fields keep the current default.
+func SetDefaults(w Weights) {
+	d := defaults
+	if w.Severity != 0 {
+		d.Severity = w.Severity
+	}
+	if w.Confidence != 0 {
+		d.Confidence = w.Confidence
+	}
+	if w.InDiff != 0 {
+		d.InDiff = w.InDiff
+	}
+	if w.References != 0 {
+		d.References = w.References
+	}
+	for k, v := range w.Category {
+		if v != 0 {
+			d.Category[k] = v
+		}
+	}
+	defaults = d
 }
 
 // Score computes a 0–100 priority and a human-readable reason.
 func Score(f model.Finding) (float64, string) {
-	sev := float64(model.SeverityWeight[f.Severity]) / 4 * 60 // 0–60
-	conf := f.Confidence * 15                                 // 0–15
-	cat := categoryBonus[f.Category]                          // 0–10
+	w := defaults
+	sev := float64(model.SeverityWeight[f.Severity]) / 4 * w.Severity
+	conf := f.Confidence * w.Confidence
+	cat := w.Category[f.Category]
 	inDiff := 0.0
 	if f.InDiff {
-		inDiff = 10
+		inDiff = w.InDiff
 	}
 	refs := 0.0
 	if len(f.References) > 0 {
-		refs = 5
+		refs = w.References
 	}
 
 	raw := sev + conf + cat + inDiff + refs
@@ -48,10 +95,10 @@ func Score(f model.Finding) (float64, string) {
 		fmt.Sprintf("category=%s(+%.0f)", f.Category, cat),
 	}
 	if inDiff > 0 {
-		reasons = append(reasons, "in_diff(+10)")
+		reasons = append(reasons, fmt.Sprintf("in_diff(+%.0f)", inDiff))
 	}
 	if refs > 0 {
-		reasons = append(reasons, "has_references(+5)")
+		reasons = append(reasons, fmt.Sprintf("references(+%.0f)", refs))
 	}
 	return round1(raw), strings.Join(reasons, " ")
 }

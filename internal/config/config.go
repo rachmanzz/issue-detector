@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/rachmanzz/issue-detector/internal/score"
 )
 
 // Default filenames resolved at scan root.
@@ -14,20 +16,21 @@ const FileName = "issue-detector.yaml"
 
 // Config mirrors the on-disk YAML shape.
 type Config struct {
-	Jobs        int           `yaml:"jobs"`          // worker MaxWorkers; 0 = NumCPU
-	SubWorker   int           `yaml:"sub_worker"`    // sub-worker fan-out per file
-	MaxFileSize int64         `yaml:"max_file_size"` // bytes; files larger are skipped
-	Timeout     time.Duration `yaml:"timeout"`       // whole-scan budget
-	FailOn      string        `yaml:"fail_on"`       // none|low|medium|high|critical
-	SeverityMin string        `yaml:"severity_min"`  // minimum severity to report
-	Categories  []string      `yaml:"categories"`    // enabled categories
-	Ignore      []string      `yaml:"ignore"`        // extra ignore globs
-	Remote      string        `yaml:"remote"`        // git URL to clone
-	Base        string        `yaml:"base"`          // delta scan base ref (PRD §3.4)
-	Diff        string        `yaml:"diff"`          // delta scan patch file
-	NoGit       bool          `yaml:"no_git"`        // skip git health analysis
-	Rules       []string      `yaml:"rules"`         // extra rule files/dirs (PRD §8)
-	RulesDir    string        `yaml:"rules_dir"`     // default rule dir (default .issue-detector/rules)
+	Jobs         int           `yaml:"jobs"`          // worker MaxWorkers; 0 = NumCPU
+	SubWorker    int           `yaml:"sub_worker"`    // sub-worker fan-out per file
+	MaxFileSize  int64         `yaml:"max_file_size"` // bytes; files larger are skipped
+	Timeout      time.Duration `yaml:"timeout"`       // whole-scan budget
+	FailOn       string        `yaml:"fail_on"`       // none|low|medium|high|critical
+	SeverityMin  string        `yaml:"severity_min"`  // minimum severity to report
+	Categories   []string      `yaml:"categories"`    // enabled categories
+	Ignore       []string      `yaml:"ignore"`        // extra ignore globs
+	Remote       string        `yaml:"remote"`        // git URL to clone
+	Base         string        `yaml:"base"`          // delta scan base ref (PRD §3.4)
+	Diff         string        `yaml:"diff"`          // delta scan patch file
+	NoGit        bool          `yaml:"no_git"`        // skip git health analysis
+	Rules        []string      `yaml:"rules"`         // extra rule files/dirs (PRD §8)
+	RulesDir     string        `yaml:"rules_dir"`     // default rule dir (default .issue-detector/rules)
+	ScoreWeights score.Weights `yaml:"score_weights"` // priority score coefficients (roast v9)
 }
 
 // Default returns the baked-in defaults (PRD §10 performa/default flags).

@@ -204,7 +204,7 @@ issue-detector serve --root . --history .issue-detector-history.db
 issue-detector scan . --web
 ```
 
-Endpoint: `GET /` (UI), `GET /api/scan` (hasil + filter `severity_min`/`category`/`source`/`in_diff`), `GET /api/events` (SSE live progress), `GET /api/rules`, `GET /api/trend`, `POST /api/triage` (mark FP → baseline). Sekuriti: bind default `127.0.0.1`, guard Origin anti-CSRF, header CSP/X-Content-Type-Options. Tanpa autentikasi — jangan bind ke jaringan tanpa eksplisit `--host`.
+Endpoint: `GET /` (UI), `GET /api/scan` (hasil + filter `severity_min`/`category`/`source`/`in_diff`), `GET /api/events` (SSE live progress), `GET /api/rules`, `GET /api/trend`, `POST /api/triage` (mark FP → baseline), `POST /api/rules/test` (rule lab). Sekuriti: bind default `127.0.0.1`, guard Origin anti-CSRF, header CSP ketat (script eksternal), dan **`--ui-token`** — wajib untuk bind di luar localhost serta untuk semua `/api/*` dan `/mcp` bila di-set. Tanpa autentikasi di loopback; jangan bind ke jaringan tanpa `--ui-token`.
 
 ### Rule kustom (YAML)
 

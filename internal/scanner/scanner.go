@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -111,6 +112,9 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
+// scanMu serializes scans (see Scanner.Scan comment).
+var scanMu sync.Mutex
+
 // Scan performs a full scan: fetch root → enumerate → queue per-file tasks →
 // worker-parsed analysis → aggregate. Returns a report and, unless infra fails,
 // a nil error (file-level failures are counted, not fatal).
@@ -119,6 +123,13 @@ func Scan(ctx context.Context, opts Options) (*model.ScanResult, error) {
 }
 
 func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
+	// fiber-extras queue/worker expose process-global singletons
+	// (SetDriver/RegisterHandler/StartConsumer/StopConsumer/SetGlobalDispatcher).
+	// One scan at a time per process keeps their state from cross-binding
+	// (external-audit: fiber-extras-global-misuse; roast v2).
+	scanMu.Lock()
+	defer scanMu.Unlock()
+
 	start := time.Now()
 
 	if s.opts.Config.Timeout > 0 {
@@ -247,6 +258,7 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 
 	findings = dedup(findings)
 	model.SortFindings(findings)
+	score.SetDefaults(s.opts.Config.ScoreWeights)
 	score.Apply(findings)
 	sum.Findings = len(findings)
 	sum.BySeverity = map[model.Severity]int{}

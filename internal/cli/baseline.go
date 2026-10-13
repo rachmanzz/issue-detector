@@ -15,7 +15,13 @@ import (
 const DefaultBaselineFile = ".issue-detector-baseline.json"
 
 func newBaselineCmd() *cobra.Command {
-	var output string
+	var (
+		output     string
+		ignore     []string
+		noGit      bool
+		noDeps     bool
+		noAdapters bool
+	)
 	cmd := &cobra.Command{
 		Use:   "baseline [root]",
 		Short: "Tulis baseline dari hasil scan (untuk suppress temuan lama)",
@@ -25,10 +31,13 @@ func newBaselineCmd() *cobra.Command {
 			if len(args) == 1 {
 				root = args[0]
 			}
+			cfg := config.Default()
+			cfg.NoGit = noGit
+			cfg.Ignore = append(cfg.Ignore, ignore...)
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			res, err := scanner.Scan(cmd.Context(), scanner.Options{
 				Root:   root,
-				Config: config.Default(),
+				Config: cfg,
 				Log:    logger,
 			})
 			if err != nil {
@@ -41,6 +50,11 @@ func newBaselineCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&output, "output", "o", DefaultBaselineFile, "path file baseline")
+	fl := cmd.Flags()
+	fl.StringVarP(&output, "output", "o", DefaultBaselineFile, "path file baseline")
+	fl.StringArrayVar(&ignore, "ignore", nil, "pola ignore tambahan (globs)")
+	fl.BoolVar(&noGit, "no-git", false, "lewati analisis kesehatan git")
+	fl.BoolVar(&noDeps, "no-deps", false, "lewati pemindaian dependency & CVE")
+	fl.BoolVar(&noAdapters, "no-adapters", false, "lewati adapter eksternal")
 	return cmd
 }

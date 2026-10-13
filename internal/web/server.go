@@ -33,6 +33,9 @@ type Options struct {
 	HistoryPath  string
 	BaselinePath string
 	Log          *slog.Logger
+	// Token, when set, requires "Authorization: Bearer <token>" on every /api/* and /mcp
+	// endpoint — mandatory in practice when binding beyond localhost (roast v11).
+	Token string
 	// MCP, when set, exposes POST /mcp (MCP http transport, PRD §3.7).
 	MCP *mcp.Server
 }
@@ -62,8 +65,10 @@ func (s *Server) App() *fiber.App {
 
 	app.Use(s.securityHeaders)
 	app.Use(s.originGuard)
+	app.Use(s.authGuard)
 
 	app.Get("/", s.handleIndex)
+	app.Get("/static/app.js", s.handleAppJS)
 	app.Get("/api/scan", s.handleScan)
 	app.Get("/api/events", s.handleEvents)
 	app.Get("/api/rules", s.handleRules)
@@ -97,7 +102,7 @@ func (s *Server) Listen(host string, port int) error {
 func (s *Server) securityHeaders(c fiber.Ctx) error {
 	c.Set("X-Content-Type-Options", "nosniff")
 	c.Set("Content-Security-Policy",
-		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'")
+		"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	c.Set("Referrer-Policy", "no-referrer")
 	return c.Next()
 }
@@ -119,6 +124,19 @@ func (s *Server) originGuard(c fiber.Ctx) error {
 	return fiber.NewError(fiber.StatusForbidden, "origin tidak diizinkan")
 }
 
+// authGuard requires a bearer token for every endpoint when configured.
+func (s *Server) authGuard(c fiber.Ctx) error {
+	if s.opts.Token == "" {
+		return c.Next()
+	}
+	const prefix = "Bearer "
+	auth := c.Get("Authorization")
+	if strings.HasPrefix(auth, prefix) && strings.TrimSpace(auth[len(prefix):]) == s.opts.Token {
+		return c.Next()
+	}
+	return fiber.NewError(fiber.StatusUnauthorized, "token tidak valid")
+}
+
 func (s *Server) scan(ctx context.Context, onProgress func(scanner.Progress)) (*model.ScanResult, error) {
 	res, err := scanner.Scan(ctx, scanner.Options{
 		Root:       s.opts.Root,
@@ -138,6 +156,11 @@ func (s *Server) scan(ctx context.Context, onProgress func(scanner.Progress)) (*
 func (s *Server) handleIndex(c fiber.Ctx) error {
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(indexHTML)
+}
+
+func (s *Server) handleAppJS(c fiber.Ctx) error {
+	c.Set("Content-Type", "application/javascript; charset=utf-8")
+	return c.SendString(appJS)
 }
 
 func (s *Server) handleScan(c fiber.Ctx) error {
@@ -247,13 +270,14 @@ func (s *Server) handleRuleLab(c fiber.Ctx) error {
 }
 
 // filterFindings applies query filters: severity_min, category, source, in_diff.
+// Pure: never mutates the input slice (must not corrupt the stored last result).
 func filterFindings(fs []model.Finding, c fiber.Ctx) []model.Finding {
 	sevMin := model.SeverityWeight[model.Severity(c.Query("severity_min"))]
 	category := model.Category(c.Query("category"))
 	source := model.Source(c.Query("source"))
 	inDiffOnly := c.Query("in_diff") == "1" || c.Query("in_diff") == "true"
 
-	out := fs[:0]
+	out := make([]model.Finding, 0, len(fs))
 	for _, f := range fs {
 		if sevMin > 0 && model.SeverityWeight[f.Severity] < sevMin {
 			continue

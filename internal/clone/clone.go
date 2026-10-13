@@ -63,17 +63,22 @@ func Detect(entries []fetcher.Entry, minTokens int) []model.Finding {
 
 	var out []model.Finding
 	reported := map[string]bool{}
+	lastLineInFile := map[string]int{}
 	for _, spots := range windows {
 		if len(spots) < 2 {
 			continue
 		}
 		// Deterministic order; skip the first occurrence (the "original").
 		for _, s := range spots[1:] {
-			k := s.file
-			if reported[k+"\x00"+itoa(s.line)] {
+			if reported[s.file+"\x00"+itoa(s.line)] {
 				continue
 			}
-			reported[k+"\x00"+itoa(s.line)] = true
+			// Fuse overlapping windows in the same file: report one region.
+			if prev := lastLineInFile[s.file]; prev > 0 && s.line-prev < fuseLines {
+				continue
+			}
+			lastLineInFile[s.file] = s.line
+			reported[s.file+"\x00"+itoa(s.line)] = true
 			out = append(out, model.Finding{
 				RuleID: "DUP-001", Category: model.CategoryQuality, Severity: model.SeverityLow,
 				Title:   "Duplicated code block",
@@ -88,6 +93,10 @@ func Detect(entries []fetcher.Entry, minTokens int) []model.Finding {
 	}
 	return out
 }
+
+// fuseLines merges windows that start within a few lines of each other, so a
+// repeated block is reported once instead of once per offset (roast v8).
+const fuseLines = 12
 
 // lexFile strips comments and returns a normalized token stream with lines.
 func lexFile(p string) ([]token, error) {

@@ -11,12 +11,32 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/rachmanzz/issue-detector/internal/model"
 )
 
 func testApp(t *testing.T, root, baselinePath string) *fiber.App {
 	t.Helper()
 	srv := New(Options{Root: root, BaselinePath: baselinePath})
 	return srv.App()
+}
+
+func TestTokenAuth(t *testing.T) {
+	srv := New(Options{Root: t.TempDir(), Token: "sekret"})
+	app := srv.App()
+
+	noAuth, _ := app.Test(newReq(http.MethodGet, "/api/rules", ""))
+	defer noAuth.Body.Close()
+	if noAuth.StatusCode != http.StatusUnauthorized {
+		t.Errorf("tanpa token harus 401, got %d", noAuth.StatusCode)
+	}
+
+	okReq := newReq(http.MethodGet, "/api/rules", "")
+	okReq.Header.Set("Authorization", "Bearer sekret")
+	ok, _ := app.Test(okReq)
+	defer ok.Body.Close()
+	if ok.StatusCode != 200 {
+		t.Errorf("dengan token harus 200, got %d", ok.StatusCode)
+	}
 }
 
 func TestScanEngineResult(t *testing.T) {
@@ -96,6 +116,31 @@ func TestTriagePersistsBaseline(t *testing.T) {
 func newReq(method, path, body string) *http.Request {
 	req, _ := http.NewRequest(method, path, strings.NewReader(body))
 	return req
+}
+
+// TestFilterFindingsIsPure guards roast v1: filtering must never mutate the
+// stored scan result (shared backing array).
+func TestFilterFindingsIsPure(t *testing.T) {
+	app := fiber.New()
+	app.Get("/t", func(c fiber.Ctx) error {
+		fs := []model.Finding{
+			{RuleID: "X", Severity: model.SeverityCritical, File: "a.go"},
+			{RuleID: "Y", Severity: model.SeverityInfo, File: "a.go"},
+		}
+		out := filterFindings(fs, c)
+		if len(fs) != 2 || fs[1].RuleID != "Y" {
+			t.Errorf("input slice dimutasi: %+v", fs)
+		}
+		if len(out) != 1 {
+			t.Errorf("filter salah: %+v", out)
+		}
+		return c.JSON(fiber.Map{"in": len(fs), "out": len(out)})
+	})
+	resp, _ := app.Test(newReq(http.MethodGet, "/t?severity_min=critical", ""))
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
 }
 
 func TestRuleLab(t *testing.T) {

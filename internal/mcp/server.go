@@ -14,10 +14,12 @@ import (
 
 	"github.com/rachmanzz/issue-detector/internal/baseline"
 	"github.com/rachmanzz/issue-detector/internal/config"
+	"github.com/rachmanzz/issue-detector/internal/deps"
 	"github.com/rachmanzz/issue-detector/internal/history"
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
+	"github.com/rachmanzz/issue-detector/internal/score"
 )
 
 // Server holds MCP session state and tool implementations.
@@ -105,11 +107,14 @@ func (s *Server) toolList() []map[string]any {
 	}
 	return []map[string]any{
 		{"name": "scan",
-			"description": "Pindai root/path dan kembalikan temuan (ScanResult).",
+			"description": "Pindai root/path dan kembalikan temuan (ScanResult), termasuk CVE OSV dan baseline filter.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"root": str("path yang dipindai (default: root server)"),
+					"root":     str("path yang dipindai (default: root server)"),
+					"baseline": str("path file baseline (filter temuan lama)"),
+					"no_git":   map[string]any{"type": "boolean", "description": "lewati analisis git"},
+					"no_deps":  map[string]any{"type": "boolean", "description": "lewati CVE/dependency (offline)"},
 				},
 			}},
 		{"name": "get_finding",
@@ -187,14 +192,44 @@ func (s *Server) toolScan(ctx context.Context, args map[string]any) (any, error)
 	if r, ok := args["root"].(string); ok && r != "" {
 		root = r
 	}
-	res, err := scanner.Scan(ctx, scanner.Options{Root: root, Config: s.Config})
+	cfg := s.Config
+	if v, ok := args["no_git"].(bool); ok {
+		cfg.NoGit = v
+	}
+	noDeps := false
+	if v, ok := args["no_deps"].(bool); ok {
+		noDeps = v
+	}
+	res, err := scanner.Scan(ctx, scanner.Options{Root: root, Config: cfg})
 	if err != nil {
 		return nil, err
+	}
+	if !noDeps && len(res.Dependencies) > 0 {
+		if cve, cerr := deps.NewClient().Lookup(ctx, res.Dependencies); cerr == nil && len(cve) > 0 {
+			mergeFindings(res, cve)
+		}
+	}
+	if bp, ok := args["baseline"].(string); ok && bp != "" {
+		if set, berr := baseline.Load(bp); berr == nil {
+			set.Filter(res)
+		}
 	}
 	s.mu.Lock()
 	s.last = res
 	s.mu.Unlock()
 	return res, nil
+}
+
+// mergeFindings appends extra findings (CVE) and re-derives summary+score.
+func mergeFindings(res *model.ScanResult, extra []model.Finding) {
+	res.Findings = append(res.Findings, extra...)
+	model.SortFindings(res.Findings)
+	score.Apply(res.Findings)
+	res.Summary.Findings = len(res.Findings)
+	res.Summary.BySeverity = map[model.Severity]int{}
+	for _, f := range res.Findings {
+		res.Summary.BySeverity[f.Severity]++
+	}
 }
 
 func (s *Server) toolGetFinding(query string) any {

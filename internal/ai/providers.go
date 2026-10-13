@@ -101,7 +101,7 @@ type geminiProvider struct {
 }
 
 func (p *geminiProvider) Complete(ctx context.Context, prompt string) (string, error) {
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", p.base, p.model, p.key)
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", p.base, p.model)
 	body, _ := json.Marshal(map[string]any{
 		"contents": []map[string]any{
 			{"parts": []map[string]string{{"text": prompt}}},
@@ -113,6 +113,7 @@ func (p *geminiProvider) Complete(ctx context.Context, prompt string) (string, e
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", p.key)
 	resp, err := p.http.Do(req)
 	if err != nil {
 		return "", err

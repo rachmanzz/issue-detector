@@ -21,9 +21,23 @@ const version = 1
 type Set map[string]struct{}
 
 // Fingerprint derives a stable identity for a finding.
+//
+// Findings that carry a snippet stay line-independent (a white-space shift does
+// not resurrect them). File-level findings (empty snippet, e.g. git/dep at
+// line 0) hash title+reference context instead of the empty string, so distinct
+// findings in the same file do not collide (PRD §11 M3; roast v10).
 func Fingerprint(f model.Finding) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00%s", f.RuleID, f.File, normalize(f.Snippet))
+	fmt.Fprintf(h, "%s\x00%s\x00", f.RuleID, f.File)
+	if s := normalize(f.Snippet); s != "" {
+		fmt.Fprintf(h, "s\x00%s", s)
+	} else {
+		ref := ""
+		if len(f.References) > 0 {
+			ref = f.References[0]
+		}
+		fmt.Fprintf(h, "l\x00%s\x00%s", f.Title, ref)
+	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 

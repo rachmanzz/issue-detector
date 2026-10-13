@@ -122,3 +122,25 @@ func ids(fs []model.Finding) map[string]int {
 	}
 	return m
 }
+
+func TestYAMLNoFalsePositiveOnLiterals(t *testing.T) {
+	entries := writeEntries(t, map[string]string{
+		"config.yaml": `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: safe
+data:
+  # privileged: true (comment — bukan flag)
+  key: "not privileged: true"
+  blob: |
+    arbitrary text
+    runAsUser: 0
+    hostNetwork: true
+    official: ok:latest
+`,
+	})
+	got := ids(Analyze(entries))
+	if len(got) != 0 {
+		t.Errorf("literal/comment tidak boleh memicu posture rule, got %v", got)
+	}
+}
