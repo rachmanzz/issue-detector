@@ -11,6 +11,22 @@ func strFile(rel string, lang model.Language, lines ...string) *model.File {
 	return &model.File{RelPath: rel, Language: lang, Lines: lines}
 }
 
+func TestExtendedSecretPatterns(t *testing.T) {
+	reg := NewRegistry()
+	rs, _ := reg.Get("SECRET-001")
+	cases := []string{
+		`key := "AKIAIOSFODNN7EXAMPLE"`,
+		`token = "ghp_012345678901234567890123456789012345"`,
+		`google := "AIzaSyA1234567890abcdefghijklmnopqrstuv"`,
+	}
+	for _, line := range cases {
+		f := strFile("x.go", model.LanguageGo, line)
+		if m, _ := rs.Matcher.Match(context.Background(), f); len(m) != 1 {
+			t.Errorf("secret not detected in %q: %+v", line, m)
+		}
+	}
+}
+
 func TestRegistryBuiltins(t *testing.T) {
 	reg := NewRegistry()
 	ids := map[string]bool{}
@@ -44,6 +60,24 @@ func TestGOTempRule(t *testing.T) {
 		t.Fatalf("want 1 match at line 2, got %+v", matches)
 	}
 
+	// os.CreateTemp with a predictable empty dir also fires (AST-detected).
+	fEmpty := strFile("y.go", model.LanguageGo,
+		"package main",
+		`os.CreateTemp("", "app")`,
+	)
+	if m, _ := r.Matcher.Match(context.Background(), fEmpty); len(m) != 1 {
+		t.Errorf("os.CreateTemp(\"\",...) not detected: %+v", m)
+	}
+
+	// os.CreateTemp with a real dir is fine.
+	fSafe := strFile("z.go", model.LanguageGo,
+		"package main",
+		`os.CreateTemp(os.TempDir(), "app")`,
+	)
+	if m, _ := r.Matcher.Match(context.Background(), fSafe); len(m) != 0 {
+		t.Errorf("false positive on safe CreateTemp: %+v", m)
+	}
+
 	// Rule must not fire on Python files.
 	fPy := strFile("x.py", model.LanguagePython, `import tempfile; tempfile.NamedTemporaryFile()`)
 	m, err := r.Matcher.Match(context.Background(), fPy)
@@ -52,6 +86,30 @@ func TestGOTempRule(t *testing.T) {
 	}
 	if len(m) != 0 {
 		t.Errorf("GO-TEMP-001 applied to non-Go file: %+v", m)
+	}
+}
+
+func TestPythonUnsafeDeser(t *testing.T) {
+	reg := NewRegistry()
+	r, _ := reg.Get("PY-DESER-001")
+	if r == nil {
+		t.Fatal("PY-DESER-001 missing")
+	}
+
+	f := strFile("a.py", model.LanguagePython,
+		"import yaml",
+		"data = yaml.load(stream)",
+	)
+	if m, _ := r.Matcher.Match(context.Background(), f); len(m) != 1 || m[0].Line != 2 {
+		t.Errorf("yaml.load not detected: %+v", m)
+	}
+
+	safe := strFile("b.py", model.LanguagePython,
+		"import yaml",
+		"data = yaml.load(stream, Loader=yaml.SafeLoader)",
+	)
+	if m, _ := r.Matcher.Match(context.Background(), safe); len(m) != 0 {
+		t.Errorf("false positive on SafeLoader: %+v", m)
 	}
 }
 

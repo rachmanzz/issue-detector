@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,7 +15,9 @@ import (
 	"github.com/rachmanzz/fiber-extras/v3/queue"
 	"github.com/rachmanzz/fiber-extras/v3/worker"
 	"github.com/rachmanzz/issue-detector/internal/config"
+	"github.com/rachmanzz/issue-detector/internal/delta"
 	"github.com/rachmanzz/issue-detector/internal/fetcher"
+	"github.com/rachmanzz/issue-detector/internal/gitx"
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/parser"
 	"github.com/rachmanzz/issue-detector/internal/rules"
@@ -29,6 +32,8 @@ type Options struct {
 	Log        *slog.Logger
 	OnProgress func(Progress)
 	Registry   *rules.Registry
+	// Delta, when non-nil, restricts reported findings to changed lines (PRD §3.4).
+	Delta *delta.Set
 }
 
 // Progress is emitted after each settled file.
@@ -58,8 +63,37 @@ func New(opts Options) *Scanner {
 	reg := opts.Registry
 	if reg == nil {
 		reg = rules.NewRegistry()
+		if err := loadExternalRules(reg, opts.Config); err != nil {
+			log.Warn("gagal memuat rule eksternal", "err", err)
+		}
 	}
 	return &Scanner{opts: opts, log: log, registry: reg, fused: opts.OnProgress}
+}
+
+// loadExternalRules adds user rule files/dirs (PRD §8) to the registry.
+func loadExternalRules(reg *rules.Registry, cfg config.Config) error {
+	paths := append([]string{}, cfg.Rules...)
+	dir := cfg.RulesDir
+	if dir == "" {
+		dir = ".issue-detector/rules"
+	}
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		paths = append(paths, dir)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	loaded, err := rules.LoadPaths(paths)
+	if err != nil {
+		return err
+	}
+	for _, r := range loaded {
+		if _, exists := reg.Get(r.ID); exists {
+			return fmt.Errorf("duplicate rule id %q", r.ID)
+		}
+		reg.Add(r)
+	}
+	return nil
 }
 
 type nopWriter struct{}
@@ -159,6 +193,25 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 	sum := s.agg.summary()
 	sum.FilesEnumerated = s.total
 
+	// Repository-level health analysis (PRD §4.5). Deterministic, best-effort.
+	if !s.opts.Config.NoGit {
+		gitOpts := gitx.DefaultOptions(cfg.MaxFileSize)
+		for _, gf := range gitx.Analyze(ctx, root, gitOpts) {
+			if s.opts.Delta != nil && !s.opts.Delta.Contains(gf.File, gf.Line) {
+				continue
+			}
+			gf.InDiff = s.opts.Delta != nil
+			findings = append(findings, gf)
+		}
+		findings = dedup(findings)
+		model.SortFindings(findings)
+		sum.Findings = len(findings)
+		sum.BySeverity = map[model.Severity]int{}
+		for _, f := range findings {
+			sum.BySeverity[f.Severity]++
+		}
+	}
+
 	return &model.ScanResult{
 		SchemaVersion: version.SchemaVersion,
 		Tool:          model.ToolInfo{Name: version.ToolName, Version: version.Version},
@@ -222,6 +275,12 @@ func (s *Scanner) analyze(ctx context.Context, pool worker.SubWorkerPool, f *mod
 		}
 	}
 
+	// Attach an AST once for this file when a grammar exists; AST rules read it
+	// read-only, line rules ignore it. Closed after all rules settle.
+	if syn, err := parser.AttachSyntax(f); err == nil && syn != nil {
+		defer syn.Close()
+	}
+
 	results := make([]ruleResult, len(applicable))
 	for i, r := range applicable {
 		i, r := i, r
@@ -244,6 +303,10 @@ func (s *Scanner) analyze(ctx context.Context, pool worker.SubWorkerPool, f *mod
 			continue
 		}
 		for _, m := range res.matches {
+			// Delta scan (PRD §3.4): only report findings on changed lines.
+			if s.opts.Delta != nil && !s.opts.Delta.Contains(f.RelPath, m.Line) {
+				continue
+			}
 			snippet := m.Snippet
 			if snippet == "" {
 				snippet = f.Line(m.Line)
@@ -260,6 +323,7 @@ func (s *Scanner) analyze(ctx context.Context, pool worker.SubWorkerPool, f *mod
 				Snippet:    snippet,
 				Confidence: res.rule.Confidence,
 				Source:     model.SourceRule,
+				InDiff:     s.opts.Delta != nil,
 			})
 		}
 	}

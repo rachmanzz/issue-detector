@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rachmanzz/issue-detector/internal/config"
+	"github.com/rachmanzz/issue-detector/internal/delta"
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/report"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
@@ -31,6 +32,10 @@ func newScanCmd() *cobra.Command {
 		timeoutSecs int
 		quiet       bool
 		ignore      []string
+		baseRef     string
+		diffFile    string
+		noGit       bool
+		rulesPath   []string
 	)
 
 	cmd := &cobra.Command{
@@ -74,6 +79,10 @@ func newScanCmd() *cobra.Command {
 			if len(ignore) > 0 {
 				cfg.Ignore = ignore
 			}
+			cfg.NoGit = noGit
+			if len(rulesPath) > 0 {
+				cfg.Rules = append(cfg.Rules, rulesPath...)
+			}
 
 			filter := model.Filter{}
 			if categories != "" {
@@ -106,11 +115,29 @@ func newScanCmd() *cobra.Command {
 				Level: slogLevel(quiet),
 			}))
 
+			// Delta scan (PRD §3.4): restrict findings to changed lines.
+			var deltaSet *delta.Set
+			switch {
+			case diffFile != "":
+				ds, err := delta.FromPatchFile(diffFile)
+				if err != nil {
+					return fmt.Errorf("diff: %w", err)
+				}
+				deltaSet = ds
+			case baseRef != "":
+				ds, err := delta.FromBase(cmd.Context(), root, baseRef)
+				if err != nil {
+					return fmt.Errorf("base: %w", err)
+				}
+				deltaSet = ds
+			}
+
 			res, err := scanner.Scan(cmd.Context(), scanner.Options{
 				Root:   root,
 				Config: cfg,
 				Filter: filter,
 				Log:    logger,
+				Delta:  deltaSet,
 			})
 			if err != nil {
 				logger.Error("scan failed", "error", err)
@@ -162,6 +189,10 @@ func newScanCmd() *cobra.Command {
 	fl.IntVar(&timeoutSecs, "timeout", 0, "batas durasi scan (detik)")
 	fl.BoolVarP(&quiet, "quiet", "q", false, "minimalkan log ke stderr")
 	fl.StringArrayVar(&ignore, "ignore", nil, "pola ignore tambahan (globs)")
+	fl.StringVar(&baseRef, "base", "", "delta scan: hanya baris berubah sejak ref (branch/tag/commit)")
+	fl.StringVar(&diffFile, "diff", "", "delta scan: dari file patch (.diff/.patch)")
+	fl.BoolVar(&noGit, "no-git", false, "lewati analisis kesehatan git")
+	fl.StringArrayVar(&rulesPath, "rules", nil, "file/direktori rule YAML tambahan (PRD §8)")
 
 	return cmd
 }

@@ -83,6 +83,57 @@ type File struct {
 	Binary     bool
 	Skipped    bool
 	SkipReason string
+
+	// Syntax is the optional parsed AST (tree-sitter), attached by the parser
+	// before rules run. Nil when the language has no grammar (line fallback).
+	Syntax Syntax
+}
+
+// ASTCapture is a single named capture from a tree-sitter query match.
+type ASTCapture struct {
+	Name string
+	Text string
+	Line int // 1-based
+}
+
+// ASTMatch is one tree-sitter query match, exposing captures by name.
+type ASTMatch struct {
+	Ordered []ASTCapture
+	byName  map[string]ASTCapture
+	Line    int // 1-based line of the match start
+}
+
+// Get returns a capture by name.
+func (m ASTMatch) Get(name string) (ASTCapture, bool) {
+	c, ok := m.byName[name]
+	return c, ok
+}
+
+// Text returns the capture text or "" when absent.
+func (m ASTMatch) Text(name string) string {
+	if c, ok := m.byName[name]; ok {
+		return c.Text
+	}
+	return ""
+}
+
+// Syntax is read-only AST access implemented by the parser (tree-sitter). It is
+// consumed by AST-based rules; the interface lives in model to avoid a
+// dependency from model on a concrete parser/tree-sitter implementation.
+type Syntax interface {
+	Language() Language
+	// FindAll runs a tree-sitter query and returns matches with named captures.
+	FindAll(query string) ([]ASTMatch, error)
+	Close()
+}
+
+// NewASTMatch builds an ASTMatch and indexes captures by name.
+func NewASTMatch(line int, caps []ASTCapture) ASTMatch {
+	m := ASTMatch{Ordered: caps, byName: make(map[string]ASTCapture, len(caps)), Line: line}
+	for _, c := range caps {
+		m.byName[c.Name] = c
+	}
+	return m
 }
 
 // Line returns the 1-based display line text, or "" when out of range.
@@ -125,6 +176,8 @@ type Finding struct {
 	Snippet    string   `json:"snippet"`
 	Confidence float64  `json:"confidence"`
 	Source     Source   `json:"source"`
+	// InDiff marks findings whose line is part of a delta/PR range (PRD §3.4).
+	InDiff bool `json:"in_diff,omitempty"`
 }
 
 // Summary aggregates scan statistics (PRD §9 report shape).

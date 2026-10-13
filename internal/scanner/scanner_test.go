@@ -2,8 +2,10 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rachmanzz/issue-detector/internal/config"
@@ -132,4 +134,34 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+// BenchmarkScan measures end-to-end pipeline throughput over a synthetic Go
+// tree (PRD §10: target >100k LOC under 30s).
+func BenchmarkScan(b *testing.B) {
+	dir := b.TempDir()
+	const files = 200
+	body := `package p
+
+import "io/ioutil"
+
+func f%d() {
+	f, _ := ioutil.TempFile("", "x")
+	_ = f
+}
+`
+	for i := 0; i < files; i++ {
+		src := fmt.Sprintf(body, i) + strings.Repeat("// filler line to grow the file\n", 50)
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.go", i)), []byte(src), 0o644); err != nil {
+			b.Fatal(err)
+		}
+	}
+	cfg := config.Default()
+	cfg.NoGit = true
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Scan(context.Background(), Options{Root: dir, Config: cfg}); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

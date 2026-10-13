@@ -52,6 +52,21 @@ func (a *aggregator) snapshot() []model.Finding {
 	return out
 }
 
+// dedup removes findings sharing (rule, file, line), preserving order.
+func dedup(in []model.Finding) []model.Finding {
+	seen := make(map[string]bool, len(in))
+	out := in[:0]
+	for _, f := range in {
+		key := fmt.Sprintf("%s\x00%s\x00%d", f.RuleID, f.File, f.Line)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, f)
+	}
+	return out
+}
+
 // progress reports how many files have settled.
 func (a *aggregator) progress() int {
 	a.mu.Lock()

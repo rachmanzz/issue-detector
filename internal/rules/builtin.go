@@ -21,7 +21,20 @@ var builtinRules = []*Rule{
 			Languages:  []model.Language{model.LanguageGo},
 			Confidence: 0.85,
 		},
-		Matcher: matchFunc(func(f *model.File) []model.Match { return matchRegexLines(f, goTempRe, 1) }),
+		Matcher: ASTMatcher{
+			Lang:  model.LanguageGo,
+			Query: goTempQuery,
+			On: func(f *model.File, m model.ASTMatch) (model.Match, bool) {
+				pkg, fn := m.Text("pkg"), m.Text("fn")
+				switch {
+				case pkg == "ioutil" && fn == "TempFile":
+					return model.Match{Line: m.Line, Snippet: snippetAt(f, m.Line)}, true
+				case pkg == "os" && fn == "CreateTemp" && emptyFirstArg(m.Text("args")):
+					return model.Match{Line: m.Line, Snippet: snippetAt(f, m.Line)}, true
+				}
+				return model.Match{}, false
+			},
+		},
 	},
 	{
 		Rule: model.Rule{
@@ -35,8 +48,34 @@ var builtinRules = []*Rule{
 			Confidence: 0.7,
 		},
 		Matcher: matchFunc(func(f *model.File) []model.Match {
-			return matchRegexLines(f, hardcodedSecretRe, 1)
+			return matchRegexes(f, secretRes, 1)
 		}),
+	},
+	{
+		Rule: model.Rule{
+			ID:         "PY-DESER-001",
+			Category:   model.CategorySecurity,
+			Severity:   model.SeverityHigh,
+			Title:      "Unsafe deserialization",
+			Message:    "Deserialisasi data tak tepercaya (yaml.load tanpa SafeLoader / pickle) dapat mengeksekusi kode.",
+			FixHint:    "Gunakan yaml.safe_load atau json; hindari pickle untuk data dari luar.",
+			Languages:  []model.Language{model.LanguagePython},
+			Confidence: 0.8,
+		},
+		Matcher: ASTMatcher{
+			Lang:  model.LanguagePython,
+			Query: pyAttrCallQuery,
+			On: func(f *model.File, m model.ASTMatch) (model.Match, bool) {
+				obj, fn, args := m.Text("obj"), m.Text("fn"), m.Text("args")
+				unsafe := (obj == "yaml" && fn == "load" && !strings.Contains(args, "SafeLoader")) ||
+					(obj == "pickle" && (fn == "load" || fn == "loads")) ||
+					(obj == "marshal" && fn == "loads")
+				if !unsafe {
+					return model.Match{}, false
+				}
+				return model.Match{Line: m.Line, Snippet: snippetAt(f, m.Line)}, true
+			},
+		},
 	},
 	{
 		Rule: model.Rule{
@@ -93,37 +132,58 @@ func (fn matchFunc) Match(_ context.Context, f *model.File) ([]model.Match, erro
 }
 
 func matchRegexLines(f *model.File, re *regexp.Regexp, maxPerFile int) []model.Match {
-	if re == nil {
-		return nil
-	}
+	return matchRegexes(f, []*regexp.Regexp{re}, maxPerFile)
+}
+
+// matchRegexes returns the first matching line for each distinct line across all
+// patterns (deduplicated, capped at maxPerFile).
+func matchRegexes(f *model.File, res []*regexp.Regexp, maxPerFile int) []model.Match {
 	var matches []model.Match
-	seen := map[string]bool{}
+	seen := map[int]bool{}
 	for i, text := range f.Lines {
-		idx := re.FindStringIndex(text)
-		if idx == nil {
-			continue
-		}
 		lineNo := i + 1
-		key := text
-		if seen[key] {
+		if seen[lineNo] {
 			continue
 		}
-		seen[key] = true
-		matches = append(matches, model.Match{
-			Line:    lineNo,
-			Snippet: strings.TrimSpace(text),
-		})
-		if len(matches) >= maxPerFile {
+		for _, re := range res {
+			if re == nil || !re.MatchString(text) {
+				continue
+			}
+			seen[lineNo] = true
+			matches = append(matches, model.Match{Line: lineNo, Snippet: strings.TrimSpace(text)})
+			break
+		}
+		if maxPerFile > 0 && len(matches) >= maxPerFile {
 			break
 		}
 	}
 	return matches
 }
 
-var (
-	goTempRe = regexp.MustCompile(`ioutil\.TempFile|os\.CreateTemp\([^)]*,\s*""|tmp Name.*O_CREAT`)
+// snippetAt returns the trimmed source line, or "" when out of range.
+func snippetAt(f *model.File, line int) string {
+	return strings.TrimSpace(f.Line(line))
+}
 
-	hardcodedSecretRe = regexp.MustCompile(`(?i)["']?(password|passwd|pwd|api[_-]?key|apikey|secret|access[_-]?token|auth[_-]?token|bearer[_-]?token)["']?\s*[:=]\s*["'][^"'\s]{6,}`)
+// emptyFirstArg reports whether a call's argument list starts with an empty
+// string literal, e.g. os.CreateTemp("", "app") — a predictable tmp dir.
+func emptyFirstArg(args string) bool {
+	t := strings.TrimSpace(args)
+	t = strings.TrimPrefix(t, "(")
+	return strings.HasPrefix(strings.TrimSpace(t), `""`)
+}
+
+var (
+	// secretRes are high-signal credential patterns (PRD §4.1 Secret Leakage).
+	secretRes = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)["']?(password|passwd|pwd|api[_-]?key|apikey|secret|access[_-]?token|auth[_-]?token|bearer[_-]?token)["']?\s*[:=]\s*["'][^"'\s]{6,}`),
+		regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                                              // AWS access key id
+		regexp.MustCompile(`AIza[0-9A-Za-z\-_]{35}`),                                        // Google API key
+		regexp.MustCompile(`xox[baprs]-[0-9A-Za-z-]{10,}`),                                  // Slack token
+		regexp.MustCompile(`gh[pousr]_[0-9A-Za-z]{36}`),                                     // GitHub token
+		regexp.MustCompile(`sk_live_[0-9A-Za-z]{16,}`),                                      // Stripe secret key
+		regexp.MustCompile(`eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}`), // JWT
+	}
 
 	privateKeyRe = regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 
@@ -133,4 +193,21 @@ var (
 		model.LanguageJavaScript: regexp.MustCompile(`console\.(log|debug|warn)\s*\(`),
 		model.LanguagePython:     regexp.MustCompile(`\bprint\s*\(`),
 	}
+)
+
+// Tree-sitter queries for AST-based rules.
+const (
+	// goTempQuery captures the package + method of a selector call and its args.
+	goTempQuery = `(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list) @args)`
+
+	// pyAttrCallQuery captures obj.method(args) calls (e.g. yaml.load(...)).
+	pyAttrCallQuery = `(call
+  function: (attribute
+    object: (identifier) @obj
+    attribute: (identifier) @fn)
+  arguments: (argument_list) @args)`
 )

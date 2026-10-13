@@ -6,7 +6,7 @@ Detektor masalah kode untuk project kecil–menengah. Men-scan folder lokal atau
 
 - **Fetcher**: scan folder lokal, atau repo git remote via clone shallow (`go-git`); hormati `.gitignore`/`.issue-detectorignore` dan direktori umum yang di-ignore (`node_modules`, `vendor`, dll.).
 - **Pipeline paralel**: tiap file diproses sebagai task pada in-memory queue; eksekusi oleh worker engine, dengan fan-out per rule (sub-worker) dan priorititas (secret-like files lebih dulu). Render-an akhir aggregator bersifat deterministik (sort severity → file → line) dan idempoten vs retry queue.
-- **Rules**: registry + matcher sederhana berbasis baris (parsing penuh menyusul, lihat Roadmap).
+- **Rules**: registry + matcher line-based & AST (tree-sitter: Go/Python/JavaScript), plus rule kustom YAML.
 - **Config**: nilai bawaan, file `issue-detector.yaml`, dan override via flag CLI.
 - **Exit codes**: cocok untuk CI gate (0/1/2).
 - **CI**: GitHub Actions `govulncheck` otomatis di `push`/`PR`/weekly.
@@ -71,6 +71,10 @@ Contoh:
 | `--timeout` | 0 | batas durasi scan (detik, 0 = tanpa batas) |
 | `--quiet` | false | hanya temuan (tanpa log engine) |
 | `--ignore` | – | pola ignore tambahan (bisa diulang) |
+| `--base` | – | delta scan: hanya baris berubah sejak ref git |
+| `--diff` | – | delta scan: dari file patch (`.diff`/`.patch`) |
+| `--no-git` | false | lewati analisis kesehatan git |
+| `--rules` | `--` | file/direktori rule YAML tambahan (bisa diulang) |
 
 ### Exit codes
 
@@ -80,15 +84,37 @@ Contoh:
 | `1` | ada temuan ≥ `--fail-on` |
 | `2` | error scan (path/remote tidak valid, dst.) |
 
-## Rules bawaan (M0)
+## Rules bawaan
 
 | Rule | Severity | Bahasa | Deteksi |
 | --- | --- | --- | --- |
-| `GO-TEMP-001` | high | Go | `ioutil.TempFile` deprecated/tidak aman |
-| `SECRET-001` | critical | multi | hardcoded secret (kata kunci + nilai) |
-| `SECRET-002` | critical | pem/ssh | kunci privat ter-commit (PEM/private) |
-| `TODO-001` | info | multi | penanda TODO/FIXME |
-| `DBG-001` | low | js/py/go | `console.log` / `print` / debug sisa |
+| `GO-TEMP-001` | high | Go | `ioutil.TempFile` / `os.CreateTemp("", …)` (AST) |
+| `PY-DESER-001` | high | Python | `yaml.load` tanpa SafeLoader / `pickle` / `marshal` (AST) |
+| `SECRET-001` | high | multi | hardcoded secret (kata kunci, AWS/Google/Slack/GitHub/Stripe/JWT) |
+| `SECRET-002` | critical | multi | kunci privat ter-commit (PEM) |
+| `TODO-001` | info | multi | penanda TODO/FIXME/HACK/XXX |
+| `DBG-001` | low | js/py | `console.log` / `print` / debug sisa |
+| `GIT-001` | critical | – | file sensitif ter-commit (`.env`, `id_rsa`, `*.pem`, …) |
+| `GIT-002` | low | – | file besar ter-track |
+| `GIT-003`–`GIT-005` | info | – | README / LICENSE / `.gitignore` tidak ada |
+| `GIT-006` | info | – | churn hotspot (file sering berubah) |
+
+### Rule kustom (YAML)
+
+Taruh file `*.yaml` di `.issue-detector/rules/` atau oper via `--rules <path>`:
+
+```yaml
+id: ACME-001
+category: quality
+severity: medium
+title: fmt.Println terdeteksi
+message: Gunakan logger, bukan fmt.Println.
+fix_hint: ganti dengan slog.
+languages: [go]
+match:
+  kind: regex          # atau: ast (tree-sitter query)
+  pattern: '\bfmt\.Println\('
+```
 
 ## Output contoh
 
@@ -104,7 +130,6 @@ Contoh:
 
 ## Roadmap
 
-- **M1** — parsing AST via tree-sitter (Go/JS/Python) menggantikan line-based
 - **M2** — kategori/rule lebih luas (SQL-injection, XSS template, dsb.)
 - **M3** — output SARIF + baseline ignore
 - **M7** — `watch` live-reload & trending

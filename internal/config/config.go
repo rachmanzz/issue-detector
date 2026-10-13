@@ -23,6 +23,11 @@ type Config struct {
 	Categories  []string      `yaml:"categories"`    // enabled categories
 	Ignore      []string      `yaml:"ignore"`        // extra ignore globs
 	Remote      string        `yaml:"remote"`        // git URL to clone
+	Base        string        `yaml:"base"`          // delta scan base ref (PRD §3.4)
+	Diff        string        `yaml:"diff"`          // delta scan patch file
+	NoGit       bool          `yaml:"no_git"`        // skip git health analysis
+	Rules       []string      `yaml:"rules"`         // extra rule files/dirs (PRD §8)
+	RulesDir    string        `yaml:"rules_dir"`     // default rule dir (default .issue-detector/rules)
 }
 
 // Default returns the baked-in defaults (PRD §10 performa/default flags).
