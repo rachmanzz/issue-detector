@@ -82,6 +82,11 @@ Contoh:
 | `--adapter` | semua | adapter eksternal: `bandit` \| `semgrep` \| `pip-audit` (bisa diulang) |
 | `--adapter-sandbox` | `default` | sandbox adapter: `none` \| `default` \| `strict` |
 | `--no-adapters` | false | lewati adapter eksternal |
+| `--ai` | false | aktifkan AI enrichment (Mode B); butuh API key env |
+| `--ai-provider` | `openai` | provider AI: `openai` \| `gemini` |
+| `--ai-model` | – | nama model (default per provider) |
+| `--ai-max-findings` | 25 | maksimum temuan di-enrich |
+| `--ai-budget-tokens` | 100000 | budget token AI (perkiraan) |
 
 ### Exit codes
 
@@ -132,6 +137,9 @@ issue-detector scan . --adapter semgrep --adapter-sandbox default
 
 # Laporan HTML self-contained
 issue-detector scan . -f html -o report.html
+
+# AI enrichment (Mode B): penjelasan + saran perbaikan (temuan high/critical)
+OPENAI_API_KEY=... issue-detector scan . --ai --ai-provider openai --ai-model gpt-4o-mini
 ```
 
 ### Baseline (CI)
@@ -174,7 +182,7 @@ match:
 
 ## Roadmap
 
-- **M5** — AI-assisted (Mode B): provider OpenAI-compatible/Gemini, enrichment, redaksi secret
+- **M6** — plugin WASM (wazero), rule pack, signature & keyring
 - **M7** — `watch` live-reload & trending
 - **M8** — Web UI (rdr-httpman)
 - **M10** — MCP `issue-detector` + loop agent-fix (lih. PRD §3.7)

@@ -9,6 +9,7 @@
 # Scan artifacts
 *.sarif
 *.html
+.issue-detector-cache/
 
 # Editors / OS
 .idea/

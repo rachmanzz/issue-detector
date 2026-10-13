@@ -80,6 +80,10 @@ func ExitFor(res *model.ScanResult, failOn model.Severity) int {
 	}
 	threshold := model.SeverityWeight[failOn]
 	for _, f := range res.Findings {
+		// AI-sourced findings are advisory and excluded from the gate (PRD §3.5).
+		if f.Source == model.SourceAI {
+			continue
+		}
 		if model.SeverityWeight[f.Severity] >= threshold {
 			return ExitFindings
 		}

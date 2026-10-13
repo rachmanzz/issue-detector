@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rachmanzz/issue-detector/internal/adapter"
+	"github.com/rachmanzz/issue-detector/internal/ai"
 	"github.com/rachmanzz/issue-detector/internal/baseline"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/delta"
@@ -46,6 +47,13 @@ func newScanCmd() *cobra.Command {
 		adapters    []string
 		adapterBox  string
 		noAdapters  bool
+		aiOn        bool
+		aiProvider  string
+		aiModel     string
+		aiBaseURL   string
+		aiMax       int
+		aiBudget    int
+		aiCacheDir  string
 	)
 
 	cmd := &cobra.Command{
@@ -190,6 +198,23 @@ func newScanCmd() *cobra.Command {
 				}
 			}
 
+			// Optional AI enrichment (PRD §6.3 Mode B). Requires an API key.
+			if aiOn {
+				key := os.Getenv("GEMINI_API_KEY")
+				if strings.EqualFold(aiProvider, "openai") || aiProvider == "" {
+					key = os.Getenv("OPENAI_API_KEY")
+				}
+				enr, err := ai.New(ai.Config{
+					Provider: aiProvider, Model: aiModel, BaseURL: aiBaseURL, APIKey: key,
+					MaxFindings: aiMax, BudgetTokens: aiBudget, CacheDir: aiCacheDir,
+				})
+				if err != nil {
+					logger.Warn("AI enrichment dilewati", "err", err)
+				} else if n := enr.Enrich(cmd.Context(), res); n > 0 {
+					logger.Info("AI enrichment selesai", "enriched", n)
+				}
+			}
+
 			// SBOM export (PRD §4.6).
 			if sbomOut != "" {
 				sf, err := os.Create(sbomOut)
@@ -267,6 +292,13 @@ func newScanCmd() *cobra.Command {
 	fl.StringArrayVar(&adapters, "adapter", nil, "adapter eksternal (bandit|semgrep|pip-audit; bisa diulang, default semua)")
 	fl.StringVar(&adapterBox, "adapter-sandbox", "default", "sandbox adapter: none|default|strict")
 	fl.BoolVar(&noAdapters, "no-adapters", false, "lewati adapter eksternal")
+	fl.BoolVar(&aiOn, "ai", false, "aktifkan AI enrichment (Mode B); butuh API key env")
+	fl.StringVar(&aiProvider, "ai-provider", "openai", "provider AI: openai|gemini")
+	fl.StringVar(&aiModel, "ai-model", "", "nama model AI (default per provider)")
+	fl.StringVar(&aiBaseURL, "ai-base-url", "", "override base URL provider AI")
+	fl.IntVar(&aiMax, "ai-max-findings", 25, "maksimum temuan di-enrich")
+	fl.IntVar(&aiBudget, "ai-budget-tokens", 100000, "budget token AI (perkiraan)")
+	fl.StringVar(&aiCacheDir, "ai-cache-dir", ".issue-detector-cache", "direktori cache AI")
 
 	return cmd
 }
