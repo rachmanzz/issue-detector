@@ -17,8 +17,10 @@ type Provider interface {
 }
 
 func newProvider(cfg Config) (Provider, error) {
-	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("ai: API key kosong")
+	// API key wajib hanya bila memakai endpoint cloud bawaan; server lokal
+	// OpenAI-compatible (Ollama/vLLM) lewat BaseURL tidak butuh key.
+	if cfg.APIKey == "" && cfg.BaseURL == "" {
+		return nil, fmt.Errorf("ai: API key kosong (set env key, atau --ai-base-url untuk server lokal)")
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
 	switch cfg.Provider {
@@ -67,7 +69,9 @@ func (p *openaiProvider) Complete(ctx context.Context, prompt string) (string, e
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.key)
+	if p.key != "" {
+		req.Header.Set("Authorization", "Bearer "+p.key)
+	}
 	resp, err := p.http.Do(req)
 	if err != nil {
 		return "", err
@@ -113,7 +117,9 @@ func (p *geminiProvider) Complete(ctx context.Context, prompt string) (string, e
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", p.key)
+	if p.key != "" {
+		req.Header.Set("x-goog-api-key", p.key)
+	}
 	resp, err := p.http.Do(req)
 	if err != nil {
 		return "", err

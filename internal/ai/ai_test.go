@@ -91,7 +91,23 @@ func TestEnrichOpenAIWithCache(t *testing.T) {
 }
 
 func TestNoKeyFails(t *testing.T) {
+	// Tanpa key DAN tanpa base URL (endpoint cloud) → error.
 	if _, err := New(Config{Provider: "openai"}); err == nil {
-		t.Error("expected error without API key")
+		t.Error("expected error without API key on cloud endpoint")
+	}
+	// Dengan base_url + model (server lokal OpenAI-compatible) → tidak butuh key.
+	if _, err := New(Config{Provider: "openai", BaseURL: "http://localhost:11434/v1", Model: "llama3"}); err != nil {
+		t.Errorf("base_url lokal harus boleh tanpa key: %v", err)
+	}
+}
+
+func TestBaseURLRequiresModel(t *testing.T) {
+	// base_url tanpa model → error (jangan pakai default OpenAI).
+	if _, err := New(Config{Provider: "openai", BaseURL: "http://localhost:11434/v1"}); err == nil {
+		t.Error("base_url tanpa model harus error")
+	}
+	// base_url + model apa pun (server bebas) → ok.
+	if _, err := New(Config{Provider: "openai", BaseURL: "http://localhost:8000/v1", Model: "mistral-7b"}); err != nil {
+		t.Errorf("base_url + model harus ok: %v", err)
 	}
 }

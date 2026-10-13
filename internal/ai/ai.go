@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,9 @@ type Enricher struct {
 	used     int
 }
 
-// New builds an Enricher. It requires a known provider and non-empty APIKey.
+// New builds an Enricher. It requires a known provider; an API key is only
+// mandatory when no custom BaseURL is set (local OpenAI-compatible servers such
+// as Ollama/vLLM need no key).
 func New(cfg Config) (*Enricher, error) {
 	if cfg.MaxFindings <= 0 {
 		cfg.MaxFindings = 25
@@ -51,6 +54,9 @@ func New(cfg Config) (*Enricher, error) {
 		cfg.CacheDir = ".issue-detector-cache"
 	}
 	if cfg.Model == "" {
+		if cfg.BaseURL != "" {
+			return nil, fmt.Errorf("ai: model wajib diisi saat memakai base_url (server OpenAI-compatible apa pun)")
+		}
 		switch cfg.Provider {
 		case "gemini":
 			cfg.Model = "gemini-1.5-flash"

@@ -46,9 +46,9 @@ rules_dir: .issue-detector/rules
 # AI enrichment (Mode B) — nonaktif secara default
 ai:
   enabled: false
-  provider: openai      # openai | gemini
-  model: ""             # default per provider
-  base_url: ""          # override (Ollama/vLLM/Azure)
+  provider: openai      # openai = protokol OpenAI-compatible (Ollama/vLLM/OpenRouter/Azure/...)
+  model: ""             # default per provider; WAJIB bila base_url diisi
+  base_url: ""          # server OpenAI-compatible apa pun (key opsional utk server lokal)
   api_key_env: ""       # nama env var key (default OPENAI_API_KEY/GEMINI_API_KEY)
   max_findings: 25
   budget_tokens: 100000

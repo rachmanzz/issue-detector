@@ -161,18 +161,27 @@ Enrichment hanya untuk temuan **high/critical**; temuan AI (`source: ai`) dikecu
 ```yaml
 ai:
   enabled: true
-  provider: openai        # openai | gemini
-  model: gpt-4o-mini      # default per provider
-  base_url: ""            # override: Ollama/vLLM/Azure/...
+  provider: openai        # "openai" = protokol OpenAI-compatible (bukan hanya api.openai.com)
+  model: gpt-4o-mini      # default per provider; WAJIB bila base_url diisi
+  base_url: ""            # server OpenAI-compatible apa pun
   api_key_env: ""         # default OPENAI_API_KEY / GEMINI_API_KEY
   max_findings: 25
   budget_tokens: 100000
   cache_dir: .issue-detector-cache
 ```
 
+`provider: openai` berarti **protokol OpenAI-compatible** — cocok untuk Ollama, vLLM, LM Studio, llama.cpp, OpenRouter, Azure, dsb. `base_url` mengarah ke server mana pun; **tidak harus dari OpenAI**. Bila `base_url` diisi, `model` wajib disebut, dan **API key opsional** (server lokal biasanya tanpa key):
+
 ```sh
-# cukup --ai bila konfigurasi ada di YAML
-OPENAI_API_KEY=... issue-detector scan . --ai
+# Ollama (lokal, tanpa key)
+issue-detector scan . --ai --ai-base-url http://localhost:11434/v1 --ai-model llama3
+
+# vLLM / LM Studio
+issue-detector scan . --ai --ai-base-url http://localhost:8000/v1 --ai-model mistral-7b
+
+# OpenRouter (butuh key)
+OPENAI_API_KEY=sk-or-... issue-detector scan . \
+  --ai --ai-base-url https://openrouter.ai/api/v1 --ai-model openai/gpt-4o-mini
 ```
 
 ### Plugin WASM
