@@ -29,6 +29,17 @@ func WriteJSON(w io.Writer, res *model.ScanResult) error {
 	return enc.Encode(res)
 }
 
+// WriteJSONLines streams one finding object per line (PRD §3.7 json-lines).
+func WriteJSONLines(w io.Writer, res *model.ScanResult) error {
+	enc := json.NewEncoder(w)
+	for _, f := range res.Findings {
+		if err := enc.Encode(f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // WriteText renders the human-readable report (PRD §9 example shape).
 func WriteText(w io.Writer, res *model.ScanResult) error {
 	var b strings.Builder

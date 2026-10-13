@@ -289,6 +289,8 @@ func newScanCmd() *cobra.Command {
 			switch format {
 			case "json":
 				err = report.WriteJSON(w, res)
+			case "json-lines":
+				err = report.WriteJSONLines(w, res)
 			case "sarif":
 				err = report.WriteSARIF(w, res)
 			case "html":
@@ -324,7 +326,7 @@ func newScanCmd() *cobra.Command {
 	}
 
 	fl := cmd.Flags()
-	fl.StringVarP(&format, "format", "f", "text", "format output: text|json|sarif|html")
+	fl.StringVarP(&format, "format", "f", "text", "format output: text|json|json-lines|sarif|html")
 	fl.StringVarP(&output, "output", "o", "", "write report ke file (default stdout)")
 	fl.StringVar(&categories, "categories", "", "kategori dipisah koma (default semua)")
 	fl.StringVar(&severityMin, "severity-min", "", "severity minimum dilaporkan: low|medium|high|critical")
@@ -412,7 +414,7 @@ func parseSeverity(s string) (model.Severity, error) {
 
 func validateFormat(f string) error {
 	switch f {
-	case "text", "json", "sarif", "html":
+	case "text", "json", "json-lines", "sarif", "html":
 		return nil
 	default:
 		return fmt.Errorf("format tidak dikenal: %q", f)

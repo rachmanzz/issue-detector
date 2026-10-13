@@ -4,11 +4,14 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/baseline"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/history"
+	"github.com/rachmanzz/issue-detector/internal/mcp"
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
@@ -29,6 +33,8 @@ type Options struct {
 	HistoryPath  string
 	BaselinePath string
 	Log          *slog.Logger
+	// MCP, when set, exposes POST /mcp (MCP http transport, PRD §3.7).
+	MCP *mcp.Server
 }
 
 // Server holds shared state for the web layer.
@@ -64,8 +70,21 @@ func (s *Server) App() *fiber.App {
 	app.Get("/api/trend", s.handleTrend)
 	app.Post("/api/triage", s.handleTriage)
 	app.Post("/api/rules/test", s.handleRuleLab)
+	if s.opts.MCP != nil {
+		app.Post("/mcp", s.handleMCP)
+	}
 
 	return app
+}
+
+// handleMCP adapts the underlying http.Handler to a Fiber route.
+func (s *Server) handleMCP(c fiber.Ctx) error {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(c.Body()))
+	req.Header.Set("Content-Type", "application/json")
+	s.opts.MCP.ServeHTTP(rec, req)
+	c.Status(rec.Code)
+	return c.Send(rec.Body.Bytes())
 }
 
 // Listen serves on the given host:port (blocking).

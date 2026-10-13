@@ -35,6 +35,7 @@ issue-detector baseline [path] [flags]
 issue-detector watch [path] [flags]
 issue-detector trend [flags]
 issue-detector serve [flags]
+issue-detector mcp [flags]              # MCP stdio untuk AI agent
 issue-detector rules list
 issue-detector version
 ```
@@ -62,7 +63,7 @@ Contoh:
 
 | Flag | Default | Keterangan |
 | --- | --- | --- |
-| `--format` | `text` | `text` \| `json` \| `sarif` \| `html` |
+| `--format` | `text` | `text` \| `json` \| `json-lines` \| `sarif` \| `html` |
 | `--output` | stdout | tulis ke file, `-` = stdout |
 | `--remote` | – | URL remote untuk clone & scan |
 | `--categories` | semua | filter kategori temuan |
@@ -235,8 +236,17 @@ match:
 
 ## Roadmap
 
-- **M9** — Web lanjutan: dataflow graf, rule lab, AI Q&A, dashboard
-- **M10** — MCP `issue-detector` + loop agent-fix (lih. PRD §3.7)
+- **Selesai (M0–M10)** — lihat `.knowledges/phases.md` untuk status rinci mileston; fitur lanjutan (dataflow graf UI, AI Q&A, transport SSE MCP, CD rilis) tercatat sebagai *ceiling* di sana.
+
+### Agent / MCP (PRD §3.7)
+
+MCP server JSON-RPC 2.0 dengan 6 tools (`scan`, `get_finding`, `fix_hint`, `rules_list`, `baseline_ignore`, `trend`):
+
+```sh
+issue-detector mcp --root .                     # transport stdio (Claude Code / opencode)
+issue-detector serve --mcp --port 8088          # transport http: POST http://127.0.0.1:8088/mcp
+issue-detector scan . -f json-lines             # satu temuan JSON per baris
+```
 
 ## Development
 
