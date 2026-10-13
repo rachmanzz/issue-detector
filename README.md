@@ -36,6 +36,7 @@ issue-detector watch [path] [flags]
 issue-detector trend [flags]
 issue-detector serve [flags]
 issue-detector mcp [flags]              # MCP stdio untuk AI agent
+issue-detector init                     # buat config default
 issue-detector rules list
 issue-detector version
 ```

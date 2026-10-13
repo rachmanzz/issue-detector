@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -16,7 +18,34 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Buat config default issue-detector.yaml",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return fmt.Errorf("init belum diimplementasikan di M0")
+			return writeDefaultConfig()
 		},
 	}
+}
+
+// writeDefaultConfig generates a commented issue-detector.yaml.
+func writeDefaultConfig() error {
+	content := `# issue-detector konfigurasi (PRD §6/§7)
+# Nilai default ditampilkan; hapus baris untuk memakai bawaan.
+
+jobs: 0                 # worker; 0 = NumCPU
+sub_worker: 5           # fan-out sub-worker per file
+max_file_size: 1048576  # batas ukuran file (1 MiB)
+timeout: 0s             # batas durasi scan (0 = tak terbatas)
+fail_on: none           # none|low|medium|high|critical
+severity_min: ""        # minimum severity dilaporkan
+categories: []          # kategori aktif (kosong = semua)
+ignore: []              # pola ignore tambahan (globs)
+remote: ""              # git URL untuk clone
+base: ""                # delta scan: ref git
+diff: ""                # delta scan: file patch
+no_git: false           # lewati analisis git
+rules: []               # rule YAML eksternal
+rules_dir: .issue-detector/rules
+`
+	if err := os.WriteFile(config.FileName, []byte(content), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("dibuat %s\n", config.FileName)
+	return nil
 }
