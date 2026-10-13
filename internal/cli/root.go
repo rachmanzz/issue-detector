@@ -1,0 +1,68 @@
+// Package cli wires the cobra command tree (PRD §7).
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"os"
+
+	"github.com/rachmanzz/issue-detector/internal/version"
+	"github.com/spf13/cobra"
+)
+
+// ExitError carries a process exit code out of command execution.
+type ExitError struct{ Code int }
+
+func (e *ExitError) Error() string { return fmt.Sprintf("exit code %d", e.Code) }
+
+func exit(code int) error { return &ExitError{Code: code} }
+
+// Execute runs the CLI; it os.Exit()s with the command's exit code.
+func Execute() error {
+	root := NewRootCmd()
+	if err := root.Execute(); err != nil {
+		var ex *ExitError
+		if errors.As(err, &ex) {
+			os.Exit(ex.Code)
+		}
+		return err
+	}
+	return nil
+}
+
+// NewRootCmd builds the full command tree.
+func NewRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "issue-detector",
+		Short:         "Deteksi issue source code: security, quality, bugs, git health (PRD-driven)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+
+	root.AddCommand(
+		newScanCmd(),
+		newRulesCmd(),
+		newVersionCmd(),
+		newServeCmd(),
+		newMCPCmd(),
+		newWatchCmd(),
+		newTrendCmd(),
+		newBaselineCmd(),
+		newInitCmd(),
+	)
+
+	return root
+}
+
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print versi tool",
+		Run: func(_ *cobra.Command, _ []string) {
+			fmt.Printf("%s v%s\n", version.ToolName, version.Version)
+			if version.Commit != "" {
+				fmt.Printf("commit %s\n", version.Commit)
+			}
+		},
+	}
+}

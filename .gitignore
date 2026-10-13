@@ -1,0 +1,21 @@
+# Binary build
+/issue-detector
+/dist/
+/bin/
+
+# Knowledge/docs (PRD dll.)
+.knowledges/
+
+# Scan artifacts
+*.sarif
+*.html
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Go
+*.test
+coverage.out
