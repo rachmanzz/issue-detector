@@ -42,6 +42,17 @@ diff: ""                # delta scan: file patch
 no_git: false           # lewati analisis git
 rules: []               # rule YAML eksternal
 rules_dir: .issue-detector/rules
+
+# AI enrichment (Mode B) — nonaktif secara default
+ai:
+  enabled: false
+  provider: openai      # openai | gemini
+  model: ""             # default per provider
+  base_url: ""          # override (Ollama/vLLM/Azure)
+  api_key_env: ""       # nama env var key (default OPENAI_API_KEY/GEMINI_API_KEY)
+  max_findings: 25
+  budget_tokens: 100000
+  cache_dir: .issue-detector-cache
 `
 	if err := os.WriteFile(config.FileName, []byte(content), 0o644); err != nil {
 		return err

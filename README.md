@@ -152,13 +152,35 @@ issue-detector scan . -f html -o report.html
 
 # AI enrichment (Mode B): penjelasan + saran perbaikan (temuan high/critical)
 OPENAI_API_KEY=... issue-detector scan . --ai --ai-provider openai --ai-model gpt-4o-mini
+```
 
-# Plugin WASM + rule pack bertanda tangan
-issue-detector scan . --plugin plugins/ --pack custom-rules.tar.gz \
-  --require-signature --pack-keyring keys.txt
+### AI (Mode B)
+
+Enrichment hanya untuk temuan **high/critical**; temuan AI (`source: ai`) dikecualikan dari `--fail-on`, dan secret diredaksi sebelum dikirim. Konfigurasi bisa lewat flag CLI atau `issue-detector.yaml` (flag menimpa YAML):
+
+```yaml
+ai:
+  enabled: true
+  provider: openai        # openai | gemini
+  model: gpt-4o-mini      # default per provider
+  base_url: ""            # override: Ollama/vLLM/Azure/...
+  api_key_env: ""         # default OPENAI_API_KEY / GEMINI_API_KEY
+  max_findings: 25
+  budget_tokens: 100000
+  cache_dir: .issue-detector-cache
+```
+
+```sh
+# cukup --ai bila konfigurasi ada di YAML
+OPENAI_API_KEY=... issue-detector scan . --ai
 ```
 
 ### Plugin WASM
+
+```sh
+issue-detector scan . --plugin plugins/ --pack custom-rules.tar.gz \
+  --require-signature --pack-keyring keys.txt
+```
 
 Plugin adalah modul WASI command (Go: `GOOS=wasip1 GOARCH=wasm`). Host menjalankannya via [wazero](https://wazero.io) dengan root scan di-mount **read-only**, arg `[name, "/"]`, dan membaca array JSON temuan dari stdout `model.Finding` (field `source` default `plugin`):
 

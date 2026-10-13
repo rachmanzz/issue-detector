@@ -31,6 +31,19 @@ type Config struct {
 	Rules        []string      `yaml:"rules"`         // extra rule files/dirs (PRD §8)
 	RulesDir     string        `yaml:"rules_dir"`     // default rule dir (default .issue-detector/rules)
 	ScoreWeights score.Weights `yaml:"score_weights"` // priority score coefficients (roast v9)
+	AI           AIConfig      `yaml:"ai"`            // AI enrichment (Mode B, PRD §6.3)
+}
+
+// AIConfig mirrors the `ai:` YAML block (Mode B enrichment).
+type AIConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	Provider     string `yaml:"provider"`      // openai | gemini
+	Model        string `yaml:"model"`         // default per provider
+	BaseURL      string `yaml:"base_url"`      // override endpoint (Ollama/vLLM/Azure/…)
+	APIKeyEnv    string `yaml:"api_key_env"`   // nama env var key; default per provider
+	MaxFindings  int    `yaml:"max_findings"`  // cap temuan di-enrich
+	BudgetTokens int    `yaml:"budget_tokens"` // budget token (perkiraan)
+	CacheDir     string `yaml:"cache_dir"`
 }
 
 // Default returns the baked-in defaults (PRD §10 performa/default flags).
@@ -79,7 +92,36 @@ func MergeLayer(base, overlay Config) Config {
 	if overlay.Remote != "" {
 		out.Remote = overlay.Remote
 	}
+	out.AI = mergeAI(out.AI, overlay.AI)
 	return out
+}
+
+func mergeAI(base, over AIConfig) AIConfig {
+	if over.Enabled {
+		base.Enabled = true
+	}
+	if over.Provider != "" {
+		base.Provider = over.Provider
+	}
+	if over.Model != "" {
+		base.Model = over.Model
+	}
+	if over.BaseURL != "" {
+		base.BaseURL = over.BaseURL
+	}
+	if over.APIKeyEnv != "" {
+		base.APIKeyEnv = over.APIKeyEnv
+	}
+	if over.MaxFindings != 0 {
+		base.MaxFindings = over.MaxFindings
+	}
+	if over.BudgetTokens != 0 {
+		base.BudgetTokens = over.BudgetTokens
+	}
+	if over.CacheDir != "" {
+		base.CacheDir = over.CacheDir
+	}
+	return base
 }
 
 // Load reads the config file at path (empty path = no file) and returns merged

@@ -40,6 +40,36 @@ func TestLoadFile(t *testing.T) {
 	}
 }
 
+func TestLoadAIBlock(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "issue-detector.yaml")
+	content := `ai:
+  enabled: true
+  provider: gemini
+  model: gemini-1.5-flash
+  api_key_env: MY_KEY
+  max_findings: 5
+  budget_tokens: 4200
+  cache_dir: .aica
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ai := cfg.AI
+	if !ai.Enabled || ai.Provider != "gemini" || ai.Model != "gemini-1.5-flash" ||
+		ai.APIKeyEnv != "MY_KEY" || ai.MaxFindings != 5 || ai.BudgetTokens != 4200 || ai.CacheDir != ".aica" {
+		t.Errorf("AI block mismatch: %+v", ai)
+	}
+	// Default config should have AI disabled.
+	if Default().AI.Enabled {
+		t.Error("AI harus default off")
+	}
+}
+
 func TestLoadMissing(t *testing.T) {
 	if _, err := Load("/nonexistent.yaml", false); err != nil {
 		t.Errorf("missing file should be fine when not required: %v", err)

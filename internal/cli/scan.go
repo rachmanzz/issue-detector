@@ -237,15 +237,39 @@ func newScanCmd() *cobra.Command {
 				}
 			}
 
-			// Optional AI enrichment (PRD §6.3 Mode B). Requires an API key.
+			// Optional AI enrichment (PRD §6.3 Mode B). Config `ai:` block + flags.
+			aiCfg := cfg.AI
 			if aiOn {
-				key := os.Getenv("GEMINI_API_KEY")
-				if strings.EqualFold(aiProvider, "openai") || aiProvider == "" {
-					key = os.Getenv("OPENAI_API_KEY")
+				aiCfg.Enabled = true
+			}
+			if aiProvider != "" {
+				aiCfg.Provider = aiProvider
+			}
+			if aiModel != "" {
+				aiCfg.Model = aiModel
+			}
+			if aiBaseURL != "" {
+				aiCfg.BaseURL = aiBaseURL
+			}
+			if aiMax > 0 {
+				aiCfg.MaxFindings = aiMax
+			}
+			if aiBudget > 0 {
+				aiCfg.BudgetTokens = aiBudget
+			}
+			if aiCacheDir != "" {
+				aiCfg.CacheDir = aiCacheDir
+			}
+			if aiCfg.Enabled {
+				provider := aiCfg.Provider
+				if provider == "" {
+					provider = "openai"
 				}
 				enr, err := ai.New(ai.Config{
-					Provider: aiProvider, Model: aiModel, BaseURL: aiBaseURL, APIKey: key,
-					MaxFindings: aiMax, BudgetTokens: aiBudget, CacheDir: aiCacheDir,
+					Provider: provider, Model: aiCfg.Model, BaseURL: aiCfg.BaseURL,
+					APIKey:      aiAPIKey(aiCfg, provider),
+					MaxFindings: aiCfg.MaxFindings, BudgetTokens: aiCfg.BudgetTokens,
+					CacheDir: aiCfg.CacheDir,
 				})
 				if err != nil {
 					logger.Warn("AI enrichment dilewati", "err", err)
@@ -351,12 +375,12 @@ func newScanCmd() *cobra.Command {
 	fl.StringVar(&adapterBox, "adapter-sandbox", "default", "sandbox adapter: none|default|strict")
 	fl.BoolVar(&noAdapters, "no-adapters", false, "lewati adapter eksternal")
 	fl.BoolVar(&aiOn, "ai", false, "aktifkan AI enrichment (Mode B); butuh API key env")
-	fl.StringVar(&aiProvider, "ai-provider", "openai", "provider AI: openai|gemini")
+	fl.StringVar(&aiProvider, "ai-provider", "", "provider AI: openai|gemini (default config/`openai`)")
 	fl.StringVar(&aiModel, "ai-model", "", "nama model AI (default per provider)")
 	fl.StringVar(&aiBaseURL, "ai-base-url", "", "override base URL provider AI")
-	fl.IntVar(&aiMax, "ai-max-findings", 25, "maksimum temuan di-enrich")
-	fl.IntVar(&aiBudget, "ai-budget-tokens", 100000, "budget token AI (perkiraan)")
-	fl.StringVar(&aiCacheDir, "ai-cache-dir", ".issue-detector-cache", "direktori cache AI")
+	fl.IntVar(&aiMax, "ai-max-findings", 0, "maksimum temuan di-enrich (default config/25)")
+	fl.IntVar(&aiBudget, "ai-budget-tokens", 0, "budget token AI (default config/100000)")
+	fl.StringVar(&aiCacheDir, "ai-cache-dir", "", "direktori cache AI (default config/.issue-detector-cache)")
 	fl.StringArrayVar(&pluginPaths, "plugin", nil, "file/direktori plugin WASM (.wasm; bisa diulang)")
 	fl.StringArrayVar(&packPaths, "pack", nil, "rule pack (direktori atau .tar.gz; bisa diulang)")
 	fl.BoolVar(&requireSig, "require-signature", false, "wajibkan tanda tangan valid untuk pack")
@@ -378,6 +402,18 @@ func mergeFindings(res *model.ScanResult, extra []model.Finding) {
 	for _, f := range res.Findings {
 		res.Summary.BySeverity[f.Severity]++
 	}
+}
+
+// aiAPIKey resolves the provider API key from the configured env var (or the
+// provider default: OPENAI_API_KEY / GEMINI_API_KEY).
+func aiAPIKey(cfg config.AIConfig, provider string) string {
+	if cfg.APIKeyEnv != "" {
+		return os.Getenv(cfg.APIKeyEnv)
+	}
+	if strings.EqualFold(provider, "gemini") {
+		return os.Getenv("GEMINI_API_KEY")
+	}
+	return os.Getenv("OPENAI_API_KEY")
 }
 
 func parseCategories(s string) (map[model.Category]bool, error) {
