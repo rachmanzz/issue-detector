@@ -51,16 +51,6 @@ func newTrendCmd() *cobra.Command {
 	}
 }
 
-func newBaselineCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "baseline",
-		Short: "Kelola baseline untuk suppress temuan lama — roadmap M3",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return notYet("M3", "baseline")
-		},
-	}
-}
-
 func newInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",

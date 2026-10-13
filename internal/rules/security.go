@@ -129,7 +129,7 @@ var (
 		regexp.MustCompile(`(?i)(err|error|exception)\.(stack|StackTrace)\b`),
 	}
 	logInjRes = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)(logger?|logging)\.(info|warn|warning|error|debug|debugf|infof|warnf|errorf)\w*\([^)]*(f"|\+|\{[a-z_]+\})`),
+		regexp.MustCompile(`(?i)\b(log|logger|logging)\.(info|warn|warning|error|debug|debugf|infof|warnf|errorf)\w*\([^)]*(f"|\+|\{[a-z_]+\})`),
 		regexp.MustCompile(`\bLog\.(Printf?|Println)\([^)]*\+`),
 	}
 	statRes = regexp.MustCompile(`\bos\.Stat\(|\bos\.Lstat\(|\bos\.path\.exists\(`)

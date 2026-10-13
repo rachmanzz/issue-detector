@@ -31,6 +31,7 @@ go run ./cmd/issue-detector scan .
 
 ```
 issue-detector scan [path|--remote URL] [flags]
+issue-detector baseline [path] [flags]
 issue-detector rules list
 issue-detector version
 ```
@@ -58,7 +59,7 @@ Contoh:
 
 | Flag | Default | Keterangan |
 | --- | --- | --- |
-| `--format` | `text` | `text` \| `json` (`sarif` menyusul) |
+| `--format` | `text` | `text` \| `json` \| `sarif` |
 | `--output` | stdout | tulis ke file, `-` = stdout |
 | `--remote` | – | URL remote untuk clone & scan |
 | `--categories` | semua | filter kategori temuan |
@@ -75,6 +76,7 @@ Contoh:
 | `--diff` | – | delta scan: dari file patch (`.diff`/`.patch`) |
 | `--no-git` | false | lewati analisis kesehatan git |
 | `--rules` | `--` | file/direktori rule YAML tambahan (bisa diulang) |
+| `--baseline` | – | abaikan temuan yang sudah ada di file baseline |
 
 ### Exit codes
 
@@ -108,6 +110,17 @@ Contoh:
 | `POSTURE-006`–`008` | medium–high | compose | privileged, host namespace, mount `docker.sock` |
 | `POSTURE-010`–`014` | low–high | K8s | privileged, host namespace/hostPath, `runAsUser: 0`, `:latest` |
 | `POSTURE-020`–`023` | low–high | Actions | `pull_request_target`, script injection, `write-all`, action tak di-pin SHA |
+| `DUP-001` | low | go/py/js/… | blok kode duplikat (token-window) |
+| `TAINT-001` | high | multi | input (HTTP/CLI) mengalir ke sink (exec/SQL/log) |
+
+### Baseline (CI)
+
+Tandai temuan lama agar CI hanya gagal pada isu **baru**:
+
+```sh
+issue-detector baseline . -o .issue-detector-baseline.json   # sekali
+issue-detector scan . --baseline .issue-detector-baseline.json --fail-on high
+```
 
 ### Rule kustom (YAML)
 
@@ -140,7 +153,6 @@ match:
 
 ## Roadmap
 
-- **M3** — dataflow ringan, dedup/clone detection, baseline, output SARIF
 - **M4** — CVE (OSV), SBOM+lisensi, HTML report, adapter Python
 - **M7** — `watch` live-reload & trending
 - **M8** — Web UI (rdr-httpman)

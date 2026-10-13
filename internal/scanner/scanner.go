@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rachmanzz/fiber-extras/v3/queue"
 	"github.com/rachmanzz/fiber-extras/v3/worker"
+	"github.com/rachmanzz/issue-detector/internal/clone"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/delta"
 	"github.com/rachmanzz/issue-detector/internal/fetcher"
@@ -213,6 +214,15 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 		}
 		pf.InDiff = s.opts.Delta != nil
 		findings = append(findings, pf)
+	}
+
+	// Clone/duplicate detection (PRD §11 M3). Deterministic.
+	for _, cf := range clone.Detect(entries, 0) {
+		if s.opts.Delta != nil && !s.opts.Delta.Contains(cf.File, cf.Line) {
+			continue
+		}
+		cf.InDiff = s.opts.Delta != nil
+		findings = append(findings, cf)
 	}
 
 	findings = dedup(findings)

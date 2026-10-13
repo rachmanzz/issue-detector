@@ -187,6 +187,7 @@ type Summary struct {
 	FilesSkipped    int              `json:"files_skipped"`
 	Errors          int              `json:"errors"`
 	Findings        int              `json:"findings"`
+	Baselined       int              `json:"baselined,omitempty"`
 	BySeverity      map[Severity]int `json:"by_severity"`
 }
 

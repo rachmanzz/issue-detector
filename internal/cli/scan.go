@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rachmanzz/issue-detector/internal/baseline"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/delta"
 	"github.com/rachmanzz/issue-detector/internal/model"
@@ -36,6 +37,7 @@ func newScanCmd() *cobra.Command {
 		diffFile    string
 		noGit       bool
 		rulesPath   []string
+		baselineF   string
 	)
 
 	cmd := &cobra.Command{
@@ -144,6 +146,17 @@ func newScanCmd() *cobra.Command {
 				return exit(report.ExitScanError)
 			}
 
+			// Baseline: suppress findings already accepted (PRD §11 M3).
+			if baselineF != "" {
+				set, err := baseline.Load(baselineF)
+				if err != nil {
+					return fmt.Errorf("baseline: %w", err)
+				}
+				if n := set.Filter(res); n > 0 {
+					logger.Info("baseline suppressed findings", "count", n, "file", baselineF)
+				}
+			}
+
 			w := os.Stdout
 			var f *os.File
 			if output != "" {
@@ -158,10 +171,15 @@ func newScanCmd() *cobra.Command {
 			switch format {
 			case "json":
 				err = report.WriteJSON(w, res)
+			case "sarif":
+				err = report.WriteSARIF(w, res)
 			default:
 				if err := report.WriteText(w, res); err != nil {
 					return err
 				}
+			}
+			if err != nil {
+				return err
 			}
 
 			if !quiet && output == "" {
@@ -176,7 +194,7 @@ func newScanCmd() *cobra.Command {
 	}
 
 	fl := cmd.Flags()
-	fl.StringVarP(&format, "format", "f", "text", "format output: text|json")
+	fl.StringVarP(&format, "format", "f", "text", "format output: text|json|sarif")
 	fl.StringVarP(&output, "output", "o", "", "write report ke file (default stdout)")
 	fl.StringVar(&categories, "categories", "", "kategori dipisah koma (default semua)")
 	fl.StringVar(&severityMin, "severity-min", "", "severity minimum dilaporkan: low|medium|high|critical")
@@ -193,6 +211,7 @@ func newScanCmd() *cobra.Command {
 	fl.StringVar(&diffFile, "diff", "", "delta scan: dari file patch (.diff/.patch)")
 	fl.BoolVar(&noGit, "no-git", false, "lewati analisis kesehatan git")
 	fl.StringArrayVar(&rulesPath, "rules", nil, "file/direktori rule YAML tambahan (PRD §8)")
+	fl.StringVar(&baselineF, "baseline", "", "abaikan temuan yang ada di file baseline (PRD §11 M3)")
 
 	return cmd
 }
@@ -231,10 +250,8 @@ func parseSeverity(s string) (model.Severity, error) {
 
 func validateFormat(f string) error {
 	switch f {
-	case "text", "json":
+	case "text", "json", "sarif":
 		return nil
-	case "sarif":
-		return errors.New("format sarif akan hadir di M3 (roadmap)")
 	case "html":
 		return errors.New("format html akan hadir di M4 (roadmap)")
 	default:
