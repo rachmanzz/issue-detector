@@ -43,6 +43,9 @@ func NewRegistry() *Registry {
 	for _, b := range builtinRules {
 		r.Add(b)
 	}
+	for _, b := range securityRules {
+		r.Add(b)
+	}
 	return r
 }
 

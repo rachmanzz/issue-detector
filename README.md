@@ -98,6 +98,16 @@ Contoh:
 | `GIT-002` | low | – | file besar ter-track |
 | `GIT-003`–`GIT-005` | info | – | README / LICENSE / `.gitignore` tidak ada |
 | `GIT-006` | info | – | churn hotspot (file sering berubah) |
+| `SEC-INJ-001` | high | multi | command/SQL/eval injection |
+| `SEC-PERM-001` | high | multi | permission world-writable (0777) |
+| `SEC-CRYPTO-001` | medium | multi | hash lemah (MD5/SHA1) |
+| `SEC-DISC-001` | medium | multi | info disclosure (debug/stack trace) |
+| `SEC-LOG-001` | low | multi | log injection |
+| `SEC-RACE-001` | medium | go/py | TOCTOU (check-then-use) |
+| `POSTURE-001`–`005` | low–high | Docker | base `:latest`, user root, `curl\|sh`, secret di ENV/ARG |
+| `POSTURE-006`–`008` | medium–high | compose | privileged, host namespace, mount `docker.sock` |
+| `POSTURE-010`–`014` | low–high | K8s | privileged, host namespace/hostPath, `runAsUser: 0`, `:latest` |
+| `POSTURE-020`–`023` | low–high | Actions | `pull_request_target`, script injection, `write-all`, action tak di-pin SHA |
 
 ### Rule kustom (YAML)
 
@@ -130,8 +140,8 @@ match:
 
 ## Roadmap
 
-- **M2** — kategori/rule lebih luas (SQL-injection, XSS template, dsb.)
-- **M3** — output SARIF + baseline ignore
+- **M3** — dataflow ringan, dedup/clone detection, baseline, output SARIF
+- **M4** — CVE (OSV), SBOM+lisensi, HTML report, adapter Python
 - **M7** — `watch` live-reload & trending
 - **M8** — Web UI (rdr-httpman)
 - **M10** — MCP `issue-detector` + loop agent-fix (lih. PRD §3.7)

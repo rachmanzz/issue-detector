@@ -20,6 +20,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/gitx"
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/parser"
+	"github.com/rachmanzz/issue-detector/internal/posture"
 	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/version"
 )
@@ -203,13 +204,23 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 			gf.InDiff = s.opts.Delta != nil
 			findings = append(findings, gf)
 		}
-		findings = dedup(findings)
-		model.SortFindings(findings)
-		sum.Findings = len(findings)
-		sum.BySeverity = map[model.Severity]int{}
-		for _, f := range findings {
-			sum.BySeverity[f.Severity]++
+	}
+
+	// Posture scan of build/deploy config (PRD §11 M2). Deterministic.
+	for _, pf := range posture.Analyze(entries) {
+		if s.opts.Delta != nil && !s.opts.Delta.Contains(pf.File, pf.Line) {
+			continue
 		}
+		pf.InDiff = s.opts.Delta != nil
+		findings = append(findings, pf)
+	}
+
+	findings = dedup(findings)
+	model.SortFindings(findings)
+	sum.Findings = len(findings)
+	sum.BySeverity = map[model.Severity]int{}
+	for _, f := range findings {
+		sum.BySeverity[f.Severity]++
 	}
 
 	return &model.ScanResult{
