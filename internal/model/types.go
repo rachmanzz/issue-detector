@@ -57,9 +57,10 @@ var SeverityWeight = map[Severity]int{
 type Source string
 
 const (
-	SourceRule   Source = "rule"
-	SourceAI     Source = "ai"
-	SourcePlugin Source = "plugin"
+	SourceRule    Source = "rule"
+	SourceAdapter Source = "adapter"
+	SourceAI      Source = "ai"
+	SourcePlugin  Source = "plugin"
 )
 
 // Language identified for a scanned file.
@@ -176,6 +177,8 @@ type Finding struct {
 	Snippet    string   `json:"snippet"`
 	Confidence float64  `json:"confidence"`
 	Source     Source   `json:"source"`
+	// References are external links (CVE/advisory URLs) — PRD §4.
+	References []string `json:"references,omitempty"`
 	// InDiff marks findings whose line is part of a delta/PR range (PRD §3.4).
 	InDiff bool `json:"in_diff,omitempty"`
 }
@@ -193,13 +196,22 @@ type Summary struct {
 
 // ScanResult is the top-level report document (schema_version = version.SchemaVersion).
 type ScanResult struct {
-	SchemaVersion string    `json:"schema_version"`
-	Tool          ToolInfo  `json:"tool"`
-	ScanID        string    `json:"scan_id"`
-	Root          string    `json:"root"`
-	DurationMs    int64     `json:"duration_ms"`
-	Summary       Summary   `json:"summary"`
-	Findings      []Finding `json:"findings"`
+	SchemaVersion string       `json:"schema_version"`
+	Tool          ToolInfo     `json:"tool"`
+	ScanID        string       `json:"scan_id"`
+	Root          string       `json:"root"`
+	DurationMs    int64        `json:"duration_ms"`
+	Summary       Summary      `json:"summary"`
+	Findings      []Finding    `json:"findings"`
+	Dependencies  []Dependency `json:"dependencies,omitempty"`
+}
+
+// Dependency is a package discovered from a manifest/lockfile (PRD §4.6).
+type Dependency struct {
+	Ecosystem string `json:"ecosystem"` // OSV ecosystem: Go, npm, PyPI, …
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	File      string `json:"file,omitempty"` // manifest it came from
 }
 
 // ToolInfo identifies the binary that produced the report.

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,11 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rachmanzz/issue-detector/internal/adapter"
 	"github.com/rachmanzz/issue-detector/internal/baseline"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/delta"
+	"github.com/rachmanzz/issue-detector/internal/deps"
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/report"
+	"github.com/rachmanzz/issue-detector/internal/sbom"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
 	"github.com/spf13/cobra"
 )
@@ -38,6 +40,12 @@ func newScanCmd() *cobra.Command {
 		noGit       bool
 		rulesPath   []string
 		baselineF   string
+		noDeps      bool
+		sbomOut     string
+		osvEndpoint string
+		adapters    []string
+		adapterBox  string
+		noAdapters  bool
 	)
 
 	cmd := &cobra.Command{
@@ -146,6 +154,31 @@ func newScanCmd() *cobra.Command {
 				return exit(report.ExitScanError)
 			}
 
+			// CVE lookup for discovered dependencies (PRD §4.6). Network; degrade
+			// gracefully when offline.
+			if !noDeps && len(res.Dependencies) > 0 {
+				client := deps.NewClient()
+				if osvEndpoint != "" {
+					client.BaseURL = osvEndpoint
+				}
+				cveFindings, err := client.Lookup(cmd.Context(), res.Dependencies)
+				if err != nil {
+					logger.Warn("osv lookup gagal; lanjut tanpa CVE", "err", err)
+				} else if len(cveFindings) > 0 {
+					mergeFindings(res, cveFindings)
+				}
+			}
+
+			// Optional external adapters (PRD §6.1/§6.2). No-op when absent.
+			if !noAdapters {
+				af := adapter.Run(cmd.Context(), adapters, adapter.Options{
+					Root: root, Sandbox: adapter.Sandbox(adapterBox),
+				})
+				if len(af) > 0 {
+					mergeFindings(res, af)
+				}
+			}
+
 			// Baseline: suppress findings already accepted (PRD §11 M3).
 			if baselineF != "" {
 				set, err := baseline.Load(baselineF)
@@ -155,6 +188,20 @@ func newScanCmd() *cobra.Command {
 				if n := set.Filter(res); n > 0 {
 					logger.Info("baseline suppressed findings", "count", n, "file", baselineF)
 				}
+			}
+
+			// SBOM export (PRD §4.6).
+			if sbomOut != "" {
+				sf, err := os.Create(sbomOut)
+				if err != nil {
+					return fmt.Errorf("sbom: %w", err)
+				}
+				if err := sbom.Write(sf, res.Tool, res.Root, res.Dependencies); err != nil {
+					sf.Close()
+					return fmt.Errorf("sbom: %w", err)
+				}
+				sf.Close()
+				logger.Info("sbom ditulis", "file", sbomOut, "packages", len(res.Dependencies))
 			}
 
 			w := os.Stdout
@@ -173,6 +220,8 @@ func newScanCmd() *cobra.Command {
 				err = report.WriteJSON(w, res)
 			case "sarif":
 				err = report.WriteSARIF(w, res)
+			case "html":
+				err = report.WriteHTML(w, res)
 			default:
 				if err := report.WriteText(w, res); err != nil {
 					return err
@@ -194,7 +243,7 @@ func newScanCmd() *cobra.Command {
 	}
 
 	fl := cmd.Flags()
-	fl.StringVarP(&format, "format", "f", "text", "format output: text|json|sarif")
+	fl.StringVarP(&format, "format", "f", "text", "format output: text|json|sarif|html")
 	fl.StringVarP(&output, "output", "o", "", "write report ke file (default stdout)")
 	fl.StringVar(&categories, "categories", "", "kategori dipisah koma (default semua)")
 	fl.StringVar(&severityMin, "severity-min", "", "severity minimum dilaporkan: low|medium|high|critical")
@@ -212,8 +261,25 @@ func newScanCmd() *cobra.Command {
 	fl.BoolVar(&noGit, "no-git", false, "lewati analisis kesehatan git")
 	fl.StringArrayVar(&rulesPath, "rules", nil, "file/direktori rule YAML tambahan (PRD §8)")
 	fl.StringVar(&baselineF, "baseline", "", "abaikan temuan yang ada di file baseline (PRD §11 M3)")
+	fl.BoolVar(&noDeps, "no-deps", false, "lewati pemindaian dependency & CVE (offline)")
+	fl.StringVar(&sbomOut, "sbom-out", "", "tulis SBOM (SPDX 2.3 JSON) ke file")
+	fl.StringVar(&osvEndpoint, "osv-endpoint", "", "override endpoint OSV API")
+	fl.StringArrayVar(&adapters, "adapter", nil, "adapter eksternal (bandit|semgrep|pip-audit; bisa diulang, default semua)")
+	fl.StringVar(&adapterBox, "adapter-sandbox", "default", "sandbox adapter: none|default|strict")
+	fl.BoolVar(&noAdapters, "no-adapters", false, "lewati adapter eksternal")
 
 	return cmd
+}
+
+// mergeFindings appends extra findings (e.g. CVE) and re-derives the summary.
+func mergeFindings(res *model.ScanResult, extra []model.Finding) {
+	res.Findings = append(res.Findings, extra...)
+	model.SortFindings(res.Findings)
+	res.Summary.Findings = len(res.Findings)
+	res.Summary.BySeverity = map[model.Severity]int{}
+	for _, f := range res.Findings {
+		res.Summary.BySeverity[f.Severity]++
+	}
 }
 
 func parseCategories(s string) (map[model.Category]bool, error) {
@@ -250,10 +316,8 @@ func parseSeverity(s string) (model.Severity, error) {
 
 func validateFormat(f string) error {
 	switch f {
-	case "text", "json", "sarif":
+	case "text", "json", "sarif", "html":
 		return nil
-	case "html":
-		return errors.New("format html akan hadir di M4 (roadmap)")
 	default:
 		return fmt.Errorf("format tidak dikenal: %q", f)
 	}

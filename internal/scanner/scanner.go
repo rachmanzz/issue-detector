@@ -17,6 +17,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/clone"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/delta"
+	"github.com/rachmanzz/issue-detector/internal/deps"
 	"github.com/rachmanzz/issue-detector/internal/fetcher"
 	"github.com/rachmanzz/issue-detector/internal/gitx"
 	"github.com/rachmanzz/issue-detector/internal/model"
@@ -225,6 +226,17 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 		findings = append(findings, cf)
 	}
 
+	// Dependency/manifest discovery (PRD §4.6). Offline; CVE lookup is done by
+	// the caller (CLI) so the scanner stays deterministic and network-free.
+	depRes := deps.Discover(entries)
+	for _, df := range depRes.Findings {
+		if s.opts.Delta != nil && !s.opts.Delta.Contains(df.File, df.Line) {
+			continue
+		}
+		df.InDiff = s.opts.Delta != nil
+		findings = append(findings, df)
+	}
+
 	findings = dedup(findings)
 	model.SortFindings(findings)
 	sum.Findings = len(findings)
@@ -241,6 +253,7 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 		DurationMs:    time.Since(start).Milliseconds(),
 		Summary:       sum,
 		Findings:      findings,
+		Dependencies:  depRes.Deps,
 	}, nil
 }
 

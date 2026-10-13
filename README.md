@@ -59,7 +59,7 @@ Contoh:
 
 | Flag | Default | Keterangan |
 | --- | --- | --- |
-| `--format` | `text` | `text` \| `json` \| `sarif` |
+| `--format` | `text` | `text` \| `json` \| `sarif` \| `html` |
 | `--output` | stdout | tulis ke file, `-` = stdout |
 | `--remote` | – | URL remote untuk clone & scan |
 | `--categories` | semua | filter kategori temuan |
@@ -77,6 +77,11 @@ Contoh:
 | `--no-git` | false | lewati analisis kesehatan git |
 | `--rules` | `--` | file/direktori rule YAML tambahan (bisa diulang) |
 | `--baseline` | – | abaikan temuan yang sudah ada di file baseline |
+| `--no-deps` | false | lewati pemindaian dependency & CVE (offline) |
+| `--sbom-out` | – | tulis SBOM (SPDX 2.3 JSON) ke file |
+| `--adapter` | semua | adapter eksternal: `bandit` \| `semgrep` \| `pip-audit` (bisa diulang) |
+| `--adapter-sandbox` | `default` | sandbox adapter: `none` \| `default` \| `strict` |
+| `--no-adapters` | false | lewati adapter eksternal |
 
 ### Exit codes
 
@@ -112,6 +117,22 @@ Contoh:
 | `POSTURE-020`–`023` | low–high | Actions | `pull_request_target`, script injection, `write-all`, action tak di-pin SHA |
 | `DUP-001` | low | go/py/js/… | blok kode duplikat (token-window) |
 | `TAINT-001` | high | multi | input (HTTP/CLI) mengalir ke sink (exec/SQL/log) |
+| `DEP-001` | low–critical | – | dependency rentan (CVE via OSV) |
+| `DEP-002` / `DEP-003` | low | – | lockfile tidak ada / dependency tidak di-pin |
+| `ADP-*` | variatif | multi | temuan dari adapter (`bandit`/`semgrep`/`pip-audit`) |
+
+### Supply chain
+
+```sh
+# SBOM (SPDX 2.3) + CVE OSV
+issue-detector scan . --sbom-out sbom.spdx.json
+
+# Adapter eksternal (dijalankan ter-sandbox; di-skip bila tool absen)
+issue-detector scan . --adapter semgrep --adapter-sandbox default
+
+# Laporan HTML self-contained
+issue-detector scan . -f html -o report.html
+```
 
 ### Baseline (CI)
 
@@ -153,7 +174,7 @@ match:
 
 ## Roadmap
 
-- **M4** — CVE (OSV), SBOM+lisensi, HTML report, adapter Python
+- **M5** — AI-assisted (Mode B): provider OpenAI-compatible/Gemini, enrichment, redaksi secret
 - **M7** — `watch` live-reload & trending
 - **M8** — Web UI (rdr-httpman)
 - **M10** — MCP `issue-detector` + loop agent-fix (lih. PRD §3.7)
