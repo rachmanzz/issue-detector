@@ -2,9 +2,12 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/rachmanzz/issue-detector/internal/version"
 	"github.com/spf13/cobra"
@@ -19,8 +22,11 @@ func exit(code int) error { return &ExitError{Code: code} }
 
 // Execute runs the CLI; it os.Exit()s with the command's exit code.
 func Execute() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	root := NewRootCmd()
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
 		var ex *ExitError
 		if errors.As(err, &ex) {
 			os.Exit(ex.Code)

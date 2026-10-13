@@ -32,6 +32,8 @@ go run ./cmd/issue-detector scan .
 ```
 issue-detector scan [path|--remote URL] [flags]
 issue-detector baseline [path] [flags]
+issue-detector watch [path] [flags]
+issue-detector trend [flags]
 issue-detector rules list
 issue-detector version
 ```
@@ -91,6 +93,7 @@ Contoh:
 | `--pack` | – | rule pack (direktori atau `.tar.gz`; bisa diulang) |
 | `--require-signature` | false | wajibkan tanda tangan valid untuk pack |
 | `--pack-keyring` | – | keyring ed25519 (baris base64 public key) |
+| `--history` | – | simpan snapshot ke database history SQLite |
 
 ### Exit codes
 
@@ -177,6 +180,16 @@ issue-detector baseline . -o .issue-detector-baseline.json   # sekali
 issue-detector scan . --baseline .issue-detector-baseline.json --fail-on high
 ```
 
+### Watch & trend (history)
+
+Setiap temuan diberi `priority_score` (0–100) + `score_reason` yang bisa diaudit. Simpan snapshot ke SQLite lalu lihat tren:
+
+```sh
+issue-detector watch . --history .issue-detector-history.db --interval 1m
+issue-detector trend --history .issue-detector-history.db
+issue-detector scan . --history .issue-detector-history.db   # snapshot tunggal
+```
+
 ### Rule kustom (YAML)
 
 Taruh file `*.yaml` di `.issue-detector/rules/` atau oper via `--rules <path>`:
@@ -208,8 +221,8 @@ match:
 
 ## Roadmap
 
-- **M7** — `watch` live-reload & trending
-- **M8** — Web UI (rdr-httpman)
+- **M8** — Mode Web (`serve`): Fiber v3, UI embedded, API
+- **M9** — Web lanjutan: dataflow graf, rule lab, AI Q&A, dashboard
 - **M10** — MCP `issue-detector` + loop agent-fix (lih. PRD §3.7)
 
 ## Development

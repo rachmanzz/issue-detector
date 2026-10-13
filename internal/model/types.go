@@ -179,6 +179,9 @@ type Finding struct {
 	Source     Source   `json:"source"`
 	// References are external links (CVE/advisory URLs) — PRD §4.
 	References []string `json:"references,omitempty"`
+	// PriorityScore (0–100) and ScoreReason are the explainable ranking (PRD §11 M7).
+	PriorityScore float64 `json:"priority_score,omitempty"`
+	ScoreReason   string  `json:"score_reason,omitempty"`
 	// InDiff marks findings whose line is part of a delta/PR range (PRD §3.4).
 	InDiff bool `json:"in_diff,omitempty"`
 }

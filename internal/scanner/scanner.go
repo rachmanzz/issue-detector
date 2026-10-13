@@ -24,6 +24,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/parser"
 	"github.com/rachmanzz/issue-detector/internal/posture"
 	"github.com/rachmanzz/issue-detector/internal/rules"
+	"github.com/rachmanzz/issue-detector/internal/score"
 	"github.com/rachmanzz/issue-detector/internal/version"
 )
 
@@ -246,6 +247,7 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 
 	findings = dedup(findings)
 	model.SortFindings(findings)
+	score.Apply(findings)
 	sum.Findings = len(findings)
 	sum.BySeverity = map[model.Severity]int{}
 	for _, f := range findings {

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/rachmanzz/issue-detector/internal/model"
+	"github.com/rachmanzz/issue-detector/internal/score"
 )
 
 // PromptVersion bumps when the prompt/response contract changes (cache key).
@@ -106,6 +107,7 @@ func (e *Enricher) Enrich(ctx context.Context, res *model.ScanResult) int {
 	if len(added) > 0 {
 		res.Findings = append(res.Findings, added...)
 		model.SortFindings(res.Findings)
+		score.Apply(res.Findings)
 		res.Summary.Findings = len(res.Findings)
 		res.Summary.BySeverity = map[model.Severity]int{}
 		for _, f := range res.Findings {

@@ -10,6 +10,7 @@
 *.sarif
 *.html
 .issue-detector-cache/
+.issue-detector-history.db
 
 # Editors / OS
 .idea/

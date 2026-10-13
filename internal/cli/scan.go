@@ -22,6 +22,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/sbom"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
+	"github.com/rachmanzz/issue-detector/internal/score"
 	"github.com/rachmanzz/issue-detector/internal/sign"
 	"github.com/spf13/cobra"
 )
@@ -63,6 +64,7 @@ func newScanCmd() *cobra.Command {
 		packPaths   []string
 		requireSig  bool
 		keyringPath string
+		historyPath string
 	)
 
 	cmd := &cobra.Command{
@@ -249,6 +251,13 @@ func newScanCmd() *cobra.Command {
 				}
 			}
 
+			// Optional history snapshot for watch/trend (PRD §11 M7).
+			if historyPath != "" {
+				if err := recordHistory(historyPath, res); err != nil {
+					logger.Warn("gagal menyimpan history", "err", err)
+				}
+			}
+
 			// SBOM export (PRD §4.6).
 			if sbomOut != "" {
 				sf, err := os.Create(sbomOut)
@@ -337,6 +346,7 @@ func newScanCmd() *cobra.Command {
 	fl.StringArrayVar(&packPaths, "pack", nil, "rule pack (direktori atau .tar.gz; bisa diulang)")
 	fl.BoolVar(&requireSig, "require-signature", false, "wajibkan tanda tangan valid untuk pack")
 	fl.StringVar(&keyringPath, "pack-keyring", "", "keyring ed25519 (baris base64 public key)")
+	fl.StringVar(&historyPath, "history", "", "simpan snapshot ke database history SQLite (PRD §11 M7)")
 
 	return cmd
 }
@@ -345,6 +355,7 @@ func newScanCmd() *cobra.Command {
 func mergeFindings(res *model.ScanResult, extra []model.Finding) {
 	res.Findings = append(res.Findings, extra...)
 	model.SortFindings(res.Findings)
+	score.Apply(res.Findings)
 	res.Summary.Findings = len(res.Findings)
 	res.Summary.BySeverity = map[model.Severity]int{}
 	for _, f := range res.Findings {

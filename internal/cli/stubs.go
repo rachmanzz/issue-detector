@@ -31,26 +31,6 @@ func newMCPCmd() *cobra.Command {
 	}
 }
 
-func newWatchCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "watch",
-		Short: "Rescan berkala + snapshot history — roadmap M7",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return notYet("M7", "watch (history SQLite)")
-		},
-	}
-}
-
-func newTrendCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "trend",
-		Short: "Laporan tren dari history — roadmap M7",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return notYet("M7", "trend")
-		},
-	}
-}
-
 func newInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
