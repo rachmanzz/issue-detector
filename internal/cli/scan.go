@@ -82,9 +82,12 @@ func newScanCmd() *cobra.Command {
 
 			cfg := config.Default()
 			if cfgPath == "" {
-				auto := filepath.Join(root, config.FileName)
-				if _, err := os.Stat(auto); err == nil {
-					cfgPath = auto
+				for _, name := range []string{config.FileName, "issue-detector.yml"} {
+					auto := filepath.Join(root, name)
+					if _, err := os.Stat(auto); err == nil {
+						cfgPath = auto
+						break
+					}
 				}
 			}
 			loaded, err := config.Load(cfgPath, cfgPath != "")
@@ -93,6 +96,7 @@ func newScanCmd() *cobra.Command {
 			}
 			cfg = loaded
 
+			// Flag menimpa YAML hanya bila eksplisit di-set (agar config dipakai).
 			if remote != "" {
 				cfg.Remote = remote
 			}
@@ -109,14 +113,37 @@ func newScanCmd() *cobra.Command {
 				cfg.Timeout = time.Duration(timeoutSecs) * time.Second
 			}
 			if len(ignore) > 0 {
-				cfg.Ignore = ignore
+				cfg.Ignore = append(cfg.Ignore, ignore...)
 			}
-			cfg.NoGit = noGit
+			if cmd.Flags().Changed("no-git") {
+				cfg.NoGit = noGit
+			}
 			if len(rulesPath) > 0 {
 				cfg.Rules = append(cfg.Rules, rulesPath...)
 			}
+			if baseRef == "" {
+				baseRef = cfg.Base
+			}
+			if diffFile == "" {
+				diffFile = cfg.Diff
+			}
 
+			// filter: config dulu, lalu override flag.
 			filter := model.Filter{}
+			if len(cfg.Categories) > 0 {
+				cats, err := parseCategories(strings.Join(cfg.Categories, ","))
+				if err != nil {
+					return err
+				}
+				filter.Categories = cats
+			}
+			if cfg.SeverityMin != "" {
+				s, err := parseSeverity(cfg.SeverityMin)
+				if err != nil {
+					return err
+				}
+				filter.SeverityMin = s
+			}
 			if categories != "" {
 				cats, err := parseCategories(categories)
 				if err != nil {

@@ -1,0 +1,9 @@
+ai:
+  enabled: true
+  provider: openai        # "openai" = protokol OpenAI-compatible (bukan hanya api.openai.com)
+  model: "glm-5-trial"      # default per provider; WAJIB bila base_url diisi
+  base_url: "https://9r.agentdev.web.id/v1"            # server OpenAI-compatible apa pun
+  api_key_env: "sk-c60b5b633b8ba408-tf6i7x-2cf1b987"         # default OPENAI_API_KEY / GEMINI_API_KEY
+  max_findings: 25
+  budget_tokens: 100000
+  cache_dir: .issue-detector-cache

@@ -7,7 +7,7 @@ Detektor masalah kode untuk project kecil–menengah. Men-scan folder lokal atau
 - **Fetcher**: scan folder lokal, atau repo git remote via clone shallow (`go-git`); hormati `.gitignore`/`.issue-detectorignore` dan direktori umum yang di-ignore (`node_modules`, `vendor`, dll.).
 - **Pipeline paralel**: tiap file diproses sebagai task pada in-memory queue; eksekusi oleh worker engine, dengan fan-out per rule (sub-worker) dan priorititas (secret-like files lebih dulu). Render-an akhir aggregator bersifat deterministik (sort severity → file → line) dan idempoten vs retry queue.
 - **Rules**: registry + matcher line-based & AST (tree-sitter: Go/Python/JavaScript), plus rule kustom YAML.
-- **Config**: nilai bawaan, file `issue-detector.yaml`, dan override via flag CLI.
+- **Config**: nilai bawaan, file `issue-detector.yaml` (atau `.yml`), dan override via flag CLI (flag hanya menimpa bila eksplisit di-set).
 - **Exit codes**: cocok untuk CI gate (0/1/2).
 - **CI**: GitHub Actions `govulncheck` otomatis di `push`/`PR`/weekly.
 
@@ -70,7 +70,7 @@ Contoh:
 | `--categories` | semua | filter kategori temuan |
 | `--severity-min` | `info` | ambang minimal severity |
 | `--fail-on` | `none` | exit code 1 jika ada severity ≥ ambang |
-| `--config` | `issue-detector.yaml` | path config YAML |
+| `--config` | `issue-detector.yaml` | path config YAML (`.yml` juga auto-detect) |
 | `--jobs` | `NumCPU` | worker paralel |
 | `--sub-worker-limit` | 0 (`5`) | fan-out sub-worker per file |
 | `--max-file-size` | 0 (`1 MiB`) | batas ukuran file (bytes) |
