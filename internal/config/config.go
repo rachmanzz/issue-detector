@@ -40,6 +40,7 @@ type AIConfig struct {
 	Provider     string `yaml:"provider"`      // openai | gemini
 	Model        string `yaml:"model"`         // default per provider
 	BaseURL      string `yaml:"base_url"`      // override endpoint (Ollama/vLLM/Azure/…)
+	APIKey       string `yaml:"api_key"`       // literal key (opsional; hati-hati jangan di-commit)
 	APIKeyEnv    string `yaml:"api_key_env"`   // nama env var key; default per provider
 	MaxFindings  int    `yaml:"max_findings"`  // cap temuan di-enrich
 	BudgetTokens int    `yaml:"budget_tokens"` // budget token (perkiraan)
@@ -108,6 +109,9 @@ func mergeAI(base, over AIConfig) AIConfig {
 	}
 	if over.BaseURL != "" {
 		base.BaseURL = over.BaseURL
+	}
+	if over.APIKey != "" {
+		base.APIKey = over.APIKey
 	}
 	if over.APIKeyEnv != "" {
 		base.APIKeyEnv = over.APIKeyEnv

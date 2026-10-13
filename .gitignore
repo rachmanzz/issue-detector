@@ -24,3 +24,7 @@ coverage.out
 
 # Intentional test fixtures (self-scan hygiene, roast v14)
 internal/testdata/
+
+# Local config may contain secrets (AI api_key) — never commit
+issue-detector.yaml
+issue-detector.yml

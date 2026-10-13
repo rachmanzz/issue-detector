@@ -447,9 +447,12 @@ func mergeFindings(res *model.ScanResult, extra []model.Finding) {
 	}
 }
 
-// aiAPIKey resolves the provider API key from the configured env var (or the
-// provider default: OPENAI_API_KEY / GEMINI_API_KEY).
+// aiAPIKey resolves the provider API key: literal api_key > env var named by
+// api_key_env > provider default env (OPENAI_API_KEY / GEMINI_API_KEY).
 func aiAPIKey(cfg config.AIConfig, provider string) string {
+	if cfg.APIKey != "" {
+		return cfg.APIKey
+	}
 	if cfg.APIKeyEnv != "" {
 		return os.Getenv(cfg.APIKeyEnv)
 	}

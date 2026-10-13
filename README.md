@@ -164,11 +164,14 @@ ai:
   provider: openai        # "openai" = protokol OpenAI-compatible (bukan hanya api.openai.com)
   model: gpt-4o-mini      # default per provider; WAJIB bila base_url diisi
   base_url: ""            # server OpenAI-compatible apa pun
-  api_key_env: ""         # default OPENAI_API_KEY / GEMINI_API_KEY
+  api_key: ""             # literal key (opsional) — JANGAN commit; file config sudah gitignored
+  api_key_env: ""         # alternatif: nama env var (default OPENAI_API_KEY / GEMINI_API_KEY)
   max_findings: 25
   budget_tokens: 100000
   cache_dir: .issue-detector-cache
 ```
+
+> Urutan resolusi key: `api_key` (literal) → `api_key_env` (nama env) → `OPENAI_API_KEY`/`GEMINI_API_KEY`. `issue-detector.yaml`/`.yml` sudah masuk `.gitignore` — jangan pernah commit key.
 
 `provider: openai` berarti **protokol OpenAI-compatible** — cocok untuk Ollama, vLLM, LM Studio, llama.cpp, OpenRouter, Azure, dsb. `base_url` mengarah ke server mana pun; **tidak harus dari OpenAI**. Bila `base_url` diisi, `model` wajib disebut, dan **API key opsional** (server lokal biasanya tanpa key):
 
