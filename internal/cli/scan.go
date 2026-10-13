@@ -173,6 +173,11 @@ func newScanCmd() *cobra.Command {
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 				Level: slogLevel(quiet),
 			}))
+			if cfgPath != "" {
+				logger.Info("config dimuat", "path", cfgPath, "ai_enabled", cfg.AI.Enabled)
+			} else {
+				logger.Info("config: default (tidak ada file issue-detector.yaml/.yml)")
+			}
 
 			// Delta scan (PRD §3.4): restrict findings to changed lines.
 			var deltaSet *delta.Set
@@ -299,9 +304,20 @@ func newScanCmd() *cobra.Command {
 					CacheDir: aiCfg.CacheDir,
 				})
 				if err != nil {
-					logger.Warn("AI enrichment dilewati", "err", err)
-				} else if n := enr.Enrich(cmd.Context(), res); n > 0 {
-					logger.Info("AI enrichment selesai", "enriched", n)
+					// Error level: tetap terlihat meski --quiet, agar tidak silent.
+					logger.Error("AI diaktifkan tapi dilewati", "err", err)
+				} else {
+					cand := ai.Candidates(res.Findings)
+					logger.Info("AI enrichment", "kandidat_high_critical", cand,
+						"provider", provider, "model", aiCfg.Model)
+					n, eerr := enr.Enrich(cmd.Context(), res)
+					if eerr != nil {
+						logger.Error("AI enrichment gagal (endpoint/key?)", "err", eerr, "enriched", n)
+					} else if n > 0 {
+						logger.Info("AI enrichment selesai", "enriched", n)
+					} else {
+						logger.Info("AI enrichment: tidak ada temuan high/critical untuk di-enrich")
+					}
 				}
 			}
 

@@ -184,6 +184,15 @@ OPENAI_API_KEY=sk-or-... issue-detector scan . \
   --ai --ai-base-url https://openrouter.ai/api/v1 --ai-model openai/gpt-4o-mini
 ```
 
+Verifikasi koneksi AI tanpa scan penuh (kirim 1 prompt, tampilkan balasannya):
+
+```sh
+issue-detector ai test --root .              # pakai issue-detector.yaml
+issue-detector ai test --provider openai --base-url http://localhost:11434/v1 --model llama3
+```
+
+Saat `ai.enabled: true`, `scan` mencetak diagnostik ke stderr: `config dimuat … ai_enabled`, `AI enrichment kandidat_high_critical=N`, dan `enriched=N` — atau `ERROR AI enrichment gagal (endpoint/key?)` bila endpoint tak terjangkau (tetap tampil walau `--quiet`).
+
 ### Plugin WASM
 
 ```sh

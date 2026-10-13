@@ -62,7 +62,7 @@ func TestEnrichOpenAIWithCache(t *testing.T) {
 		},
 		Summary: model.Summary{BySeverity: map[model.Severity]int{}},
 	}
-	n := enr.Enrich(context.Background(), res)
+	n, _ := enr.Enrich(context.Background(), res)
 	if n != 1 {
 		t.Fatalf("want 1 enriched (only high), got %d", n)
 	}
@@ -84,7 +84,7 @@ func TestEnrichOpenAIWithCache(t *testing.T) {
 	fresh := model.Finding{RuleID: "SEC-INJ-001", Severity: model.SeverityHigh, Title: "inj", Message: "m",
 		File: "a.go", Line: 1, Snippet: `exec.Command("sh","-c",x)`, Source: model.SourceRule}
 	res2 := &model.ScanResult{Findings: []model.Finding{fresh}, Summary: model.Summary{BySeverity: map[model.Severity]int{}}}
-	enr2.Enrich(context.Background(), res2)
+	_, _ = enr2.Enrich(context.Background(), res2)
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Errorf("cache miss: server hit %d times, want 1", got)
 	}

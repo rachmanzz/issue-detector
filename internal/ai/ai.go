@@ -77,10 +77,37 @@ type enrichOut struct {
 	Confidence  float64 `json:"confidence"`
 }
 
-// Enrich augments high/critical findings with AI explanation + remediation.
-// It returns the number of findings enriched. Errors per-finding are skipped.
-func (e *Enricher) Enrich(ctx context.Context, res *model.ScanResult) int {
+// Probe sends a minimal prompt to verify provider wiring (config + base_url +
+// key). Returns the raw model reply.
+func Probe(ctx context.Context, cfg Config) (string, error) {
+	e, err := New(cfg)
+	if err != nil {
+		return "", err
+	}
+	return e.provider.Complete(ctx, "Reply with exactly: ok")
+}
+
+// Candidates counts findings that are eligible for enrichment (high/critical,
+// not already AI-sourced).
+func Candidates(findings []model.Finding) int {
+	n := 0
+	for _, f := range findings {
+		if f.Source == model.SourceAI {
+			continue
+		}
+		if model.SeverityWeight[f.Severity] >= model.SeverityWeight[model.SeverityHigh] {
+			n++
+		}
+	}
+	return n
+}
+
+// Enrich augments high/critical findings with AI explanation + remediation. It
+// is best-effort: a failing finding is skipped, but the first error is returned
+// so callers can surface a dead endpoint (instead of silently doing nothing).
+func (e *Enricher) Enrich(ctx context.Context, res *model.ScanResult) (int, error) {
 	enriched := 0
+	var lastErr error
 	var added []model.Finding
 	for _, f := range res.Findings {
 		if f.Source == model.SourceAI {
@@ -98,6 +125,7 @@ func (e *Enricher) Enrich(ctx context.Context, res *model.ScanResult) int {
 		}
 		out, err := e.cached(ctx, f, prompt)
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		e.used += approxTokens(prompt)
@@ -121,7 +149,7 @@ func (e *Enricher) Enrich(ctx context.Context, res *model.ScanResult) int {
 		}
 		e.cache.save()
 	}
-	return enriched
+	return enriched, lastErr
 }
 
 func (e *Enricher) cached(ctx context.Context, f model.Finding, prompt string) (enrichOut, error) {

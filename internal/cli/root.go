@@ -54,6 +54,7 @@ func NewRootCmd() *cobra.Command {
 		newWatchCmd(),
 		newTrendCmd(),
 		newBaselineCmd(),
+		newAICmd(),
 		newInitCmd(),
 	)
 
