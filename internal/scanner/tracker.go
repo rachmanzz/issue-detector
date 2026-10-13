@@ -16,11 +16,15 @@ type completionTracker struct {
 }
 
 func newCompletionTracker(total int) *completionTracker {
-	return &completionTracker{
+	t := &completionTracker{
 		pending:   total,
 		completed: make(map[string]bool, total),
 		done:      make(chan struct{}),
 	}
+	if total <= 0 {
+		close(t.done)
+	}
+	return t
 }
 
 // complete settles a message once. Returns true only on the first settlement,

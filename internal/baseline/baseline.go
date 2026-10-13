@@ -55,6 +55,29 @@ func Save(path string, res *model.ScanResult) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
+// Add unions the given fingerprints into the baseline file at path.
+func Add(path string, fingerprints []string) error {
+	set, err := Load(path)
+	if err != nil {
+		return err
+	}
+	for _, fp := range fingerprints {
+		if fp != "" {
+			set[fp] = struct{}{}
+		}
+	}
+	fps := make([]string, 0, len(set))
+	for fp := range set {
+		fps = append(fps, fp)
+	}
+	sort.Strings(fps)
+	data, err := json.MarshalIndent(doc{Version: version, Fingerprints: fps}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
 // Load reads a baseline file. A missing file yields an empty set (not an error).
 func Load(path string) (Set, error) {
 	data, err := os.ReadFile(path)

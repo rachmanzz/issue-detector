@@ -24,6 +24,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/scanner"
 	"github.com/rachmanzz/issue-detector/internal/score"
 	"github.com/rachmanzz/issue-detector/internal/sign"
+	"github.com/rachmanzz/issue-detector/internal/web"
 	"github.com/spf13/cobra"
 )
 
@@ -65,6 +66,8 @@ func newScanCmd() *cobra.Command {
 		requireSig  bool
 		keyringPath string
 		historyPath string
+		webOn       bool
+		webPort     int
 	)
 
 	cmd := &cobra.Command{
@@ -303,6 +306,16 @@ func newScanCmd() *cobra.Command {
 				writeSummaryLine(os.Stderr, res)
 			}
 
+			// Interactive web layer (PRD §3.6). Blocks until interrupted.
+			if webOn {
+				srv := web.New(web.Options{
+					Root: root, Config: cfg, HistoryPath: historyPath,
+					BaselinePath: baselineF, Log: logger,
+				})
+				logger.Info("web UI", "url", fmt.Sprintf("http://127.0.0.1:%d", webPort))
+				return srv.Listen("127.0.0.1", webPort)
+			}
+
 			if code := report.ExitFor(res, gate); code != report.ExitOK {
 				return exit(code)
 			}
@@ -347,6 +360,8 @@ func newScanCmd() *cobra.Command {
 	fl.BoolVar(&requireSig, "require-signature", false, "wajibkan tanda tangan valid untuk pack")
 	fl.StringVar(&keyringPath, "pack-keyring", "", "keyring ed25519 (baris base64 public key)")
 	fl.StringVar(&historyPath, "history", "", "simpan snapshot ke database history SQLite (PRD §11 M7)")
+	fl.BoolVar(&webOn, "web", false, "jalankan Mode Web interaktif setelah scan (PRD §3.6)")
+	fl.IntVar(&webPort, "web-port", 8088, "port Mode Web")
 
 	return cmd
 }

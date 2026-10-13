@@ -34,6 +34,7 @@ issue-detector scan [path|--remote URL] [flags]
 issue-detector baseline [path] [flags]
 issue-detector watch [path] [flags]
 issue-detector trend [flags]
+issue-detector serve [flags]
 issue-detector rules list
 issue-detector version
 ```
@@ -93,6 +94,8 @@ Contoh:
 | `--pack` | – | rule pack (direktori atau `.tar.gz`; bisa diulang) |
 | `--require-signature` | false | wajibkan tanda tangan valid untuk pack |
 | `--pack-keyring` | – | keyring ed25519 (baris base64 public key) |
+| `--web` | false | jalankan Mode Web interaktif setelah scan |
+| `--web-port` | 8088 | port Mode Web |
 | `--history` | – | simpan snapshot ke database history SQLite |
 
 ### Exit codes
@@ -190,6 +193,17 @@ issue-detector trend --history .issue-detector-history.db
 issue-detector scan . --history .issue-detector-history.db   # snapshot tunggal
 ```
 
+### Mode Web (PRD §3.6)
+
+UI interaktif embedded (Fiber v3) — hidupkan dengan `serve` (long-running) atau `scan --web`:
+
+```sh
+issue-detector serve --root . --history .issue-detector-history.db
+issue-detector scan . --web
+```
+
+Endpoint: `GET /` (UI), `GET /api/scan` (hasil + filter `severity_min`/`category`/`source`/`in_diff`), `GET /api/events` (SSE live progress), `GET /api/rules`, `GET /api/trend`, `POST /api/triage` (mark FP → baseline). Sekuriti: bind default `127.0.0.1`, guard Origin anti-CSRF, header CSP/X-Content-Type-Options. Tanpa autentikasi — jangan bind ke jaringan tanpa eksplisit `--host`.
+
 ### Rule kustom (YAML)
 
 Taruh file `*.yaml` di `.issue-detector/rules/` atau oper via `--rules <path>`:
@@ -221,7 +235,6 @@ match:
 
 ## Roadmap
 
-- **M8** — Mode Web (`serve`): Fiber v3, UI embedded, API
 - **M9** — Web lanjutan: dataflow graf, rule lab, AI Q&A, dashboard
 - **M10** — MCP `issue-detector` + loop agent-fix (lih. PRD §3.7)
 
