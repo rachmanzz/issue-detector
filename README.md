@@ -87,6 +87,10 @@ Contoh:
 | `--ai-model` | – | nama model (default per provider) |
 | `--ai-max-findings` | 25 | maksimum temuan di-enrich |
 | `--ai-budget-tokens` | 100000 | budget token AI (perkiraan) |
+| `--plugin` | – | plugin WASM (.wasm file/direktori; bisa diulang) |
+| `--pack` | – | rule pack (direktori atau `.tar.gz`; bisa diulang) |
+| `--require-signature` | false | wajibkan tanda tangan valid untuk pack |
+| `--pack-keyring` | – | keyring ed25519 (baris base64 public key) |
 
 ### Exit codes
 
@@ -140,7 +144,29 @@ issue-detector scan . -f html -o report.html
 
 # AI enrichment (Mode B): penjelasan + saran perbaikan (temuan high/critical)
 OPENAI_API_KEY=... issue-detector scan . --ai --ai-provider openai --ai-model gpt-4o-mini
+
+# Plugin WASM + rule pack bertanda tangan
+issue-detector scan . --plugin plugins/ --pack custom-rules.tar.gz \
+  --require-signature --pack-keyring keys.txt
 ```
+
+### Plugin WASM
+
+Plugin adalah modul WASI command (Go: `GOOS=wasip1 GOARCH=wasm`). Host menjalankannya via [wazero](https://wazero.io) dengan root scan di-mount **read-only**, arg `[name, "/"]`, dan membaca array JSON temuan dari stdout `model.Finding` (field `source` default `plugin`):
+
+```go
+//go:build wasip1
+package main
+
+import ("encoding/json"; "os")
+
+func main() {
+    findings := []map[string]any{{"rule_id": "MY-001", "severity": "high", "file": "a.go", "line": 10, "message": "…"}}
+    _ = json.NewEncoder(os.Stdout).Encode(findings)
+}
+```
+
+Rule pack = direktori `*.yaml` atau bundel `.tar.gz`; pakai `--pack` dan (opsional) verifikasi ed25519 via `--require-signature --pack-keyring keys.txt` (tanda tangan di `<pack>.sig`).
 
 ### Baseline (CI)
 
@@ -182,7 +208,6 @@ match:
 
 ## Roadmap
 
-- **M6** — plugin WASM (wazero), rule pack, signature & keyring
 - **M7** — `watch` live-reload & trending
 - **M8** — Web UI (rdr-httpman)
 - **M10** — MCP `issue-detector` + loop agent-fix (lih. PRD §3.7)

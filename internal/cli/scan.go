@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,9 +16,13 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/delta"
 	"github.com/rachmanzz/issue-detector/internal/deps"
 	"github.com/rachmanzz/issue-detector/internal/model"
+	"github.com/rachmanzz/issue-detector/internal/pack"
+	"github.com/rachmanzz/issue-detector/internal/plugin"
 	"github.com/rachmanzz/issue-detector/internal/report"
+	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/sbom"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
+	"github.com/rachmanzz/issue-detector/internal/sign"
 	"github.com/spf13/cobra"
 )
 
@@ -54,6 +59,10 @@ func newScanCmd() *cobra.Command {
 		aiMax       int
 		aiBudget    int
 		aiCacheDir  string
+		pluginPaths []string
+		packPaths   []string
+		requireSig  bool
+		keyringPath string
 	)
 
 	cmd := &cobra.Command{
@@ -150,12 +159,29 @@ func newScanCmd() *cobra.Command {
 				deltaSet = ds
 			}
 
+			// Rule packs (PRD §6.5): optionally signature-verified.
+			var extraRules []*rules.Rule
+			if len(packPaths) > 0 {
+				var ring []ed25519.PublicKey
+				if keyringPath != "" {
+					ring, err = sign.LoadKeyring(keyringPath)
+					if err != nil {
+						return fmt.Errorf("keyring: %w", err)
+					}
+				}
+				extraRules, err = pack.LoadMany(packPaths, ring, requireSig)
+				if err != nil {
+					return fmt.Errorf("pack: %w", err)
+				}
+			}
+
 			res, err := scanner.Scan(cmd.Context(), scanner.Options{
-				Root:   root,
-				Config: cfg,
-				Filter: filter,
-				Log:    logger,
-				Delta:  deltaSet,
+				Root:       root,
+				Config:     cfg,
+				Filter:     filter,
+				Log:        logger,
+				Delta:      deltaSet,
+				ExtraRules: extraRules,
 			})
 			if err != nil {
 				logger.Error("scan failed", "error", err)
@@ -184,6 +210,14 @@ func newScanCmd() *cobra.Command {
 				})
 				if len(af) > 0 {
 					mergeFindings(res, af)
+				}
+			}
+
+			// Optional WASM rule plugins (PRD §6.5).
+			if len(pluginPaths) > 0 {
+				plugins := plugin.Discover(pluginPaths)
+				if pf := plugin.Run(cmd.Context(), root, plugins); len(pf) > 0 {
+					mergeFindings(res, pf)
 				}
 			}
 
@@ -299,6 +333,10 @@ func newScanCmd() *cobra.Command {
 	fl.IntVar(&aiMax, "ai-max-findings", 25, "maksimum temuan di-enrich")
 	fl.IntVar(&aiBudget, "ai-budget-tokens", 100000, "budget token AI (perkiraan)")
 	fl.StringVar(&aiCacheDir, "ai-cache-dir", ".issue-detector-cache", "direktori cache AI")
+	fl.StringArrayVar(&pluginPaths, "plugin", nil, "file/direktori plugin WASM (.wasm; bisa diulang)")
+	fl.StringArrayVar(&packPaths, "pack", nil, "rule pack (direktori atau .tar.gz; bisa diulang)")
+	fl.BoolVar(&requireSig, "require-signature", false, "wajibkan tanda tangan valid untuk pack")
+	fl.StringVar(&keyringPath, "pack-keyring", "", "keyring ed25519 (baris base64 public key)")
 
 	return cmd
 }

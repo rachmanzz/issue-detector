@@ -35,6 +35,8 @@ type Options struct {
 	Log        *slog.Logger
 	OnProgress func(Progress)
 	Registry   *rules.Registry
+	// ExtraRules are appended after builtins/external rules (e.g. rule packs).
+	ExtraRules []*rules.Rule
 	// Delta, when non-nil, restricts reported findings to changed lines (PRD §3.4).
 	Delta *delta.Set
 }
@@ -68,6 +70,11 @@ func New(opts Options) *Scanner {
 		reg = rules.NewRegistry()
 		if err := loadExternalRules(reg, opts.Config); err != nil {
 			log.Warn("gagal memuat rule eksternal", "err", err)
+		}
+	}
+	for _, r := range opts.ExtraRules {
+		if _, exists := reg.Get(r.ID); !exists {
+			reg.Add(r)
 		}
 	}
 	return &Scanner{opts: opts, log: log, registry: reg, fused: opts.OnProgress}
