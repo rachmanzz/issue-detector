@@ -13,13 +13,13 @@ import (
 	"sync"
 
 	"github.com/rachmanzz/issue-detector/internal/baseline"
-	"github.com/rachmanzz/issue-detector/internal/cache"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/deps"
 	"github.com/rachmanzz/issue-detector/internal/history"
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
+	"github.com/rachmanzz/issue-detector/internal/scanrun"
 	"github.com/rachmanzz/issue-detector/internal/score"
 )
 
@@ -31,6 +31,10 @@ type Server struct {
 	HistoryPath  string
 	Version      string
 	Log          *slog.Logger
+	// Force bypasses serving a cached result (still refreshes it); NoCache
+	// disables the session/result cache entirely (PRD §10).
+	Force   bool
+	NoCache bool
 
 	mu   sync.Mutex
 	last *model.ScanResult
@@ -116,6 +120,7 @@ func (s *Server) toolList() []map[string]any {
 					"baseline": str("path file baseline (filter temuan lama)"),
 					"no_git":   map[string]any{"type": "boolean", "description": "lewati analisis git"},
 					"no_deps":  map[string]any{"type": "boolean", "description": "lewati CVE/dependency (offline)"},
+					"force":    map[string]any{"type": "boolean", "description": "abaikan hasil cache dan scan ulang"},
 				},
 			}},
 		{"name": "get_finding",
@@ -201,32 +206,39 @@ func (s *Server) toolScan(ctx context.Context, args map[string]any) (any, error)
 	if v, ok := args["no_deps"].(bool); ok {
 		noDeps = v
 	}
-	res, err := scanner.Scan(ctx, scanner.Options{Root: root, Config: cfg})
-	if err != nil {
-		return nil, err
+	// Share the CLI's cache semantics (PRD §10): serve an unchanged cached result
+	// when nothing changed since the last scan; otherwise scan and refresh it.
+	force := s.Force
+	if b, ok := args["force"].(bool); ok {
+		force = b
 	}
-	if !noDeps && len(res.Dependencies) > 0 {
-		if cve, cerr := deps.NewClient().Lookup(ctx, res.Dependencies); cerr == nil && len(cve) > 0 {
-			mergeFindings(res, cve)
+	prep := scanrun.Prepare(ctx, scanrun.Options{
+		Root:      root,
+		Config:    cfg,
+		Log:       s.Log,
+		AIEnabled: cfg.AI.Enabled,
+		Force:     force,
+		NoCache:   s.NoCache,
+		Version:   s.Version,
+	})
+	res := prep.Cached
+	if res == nil {
+		var err error
+		res, err = scanner.Scan(ctx, scanner.Options{Root: root, Config: cfg, Delta: prep.Delta})
+		if err != nil {
+			return nil, err
 		}
-	}
-	if bp, ok := args["baseline"].(string); ok && bp != "" {
-		if set, berr := baseline.Load(bp); berr == nil {
-			set.Filter(res)
+		if !noDeps && len(res.Dependencies) > 0 {
+			if cve, cerr := deps.NewClient().Lookup(ctx, res.Dependencies); cerr == nil && len(cve) > 0 {
+				mergeFindings(res, cve)
+			}
 		}
-	}
-	// Session/change cache (PRD §10): record this project's commits + uncommitted
-	// file hashes. Best-effort; never fails the scan.
-	if cfg.Cache.Enabled == nil || *cfg.Cache.Enabled {
-		opts := cache.Options{
-			Mode:        cfg.Cache.Mode,
-			Path:        cfg.Cache.Path,
-			MaxItems:    cfg.Cache.MaxItems,
-			RuleSetHash: scanner.RulesetFingerprint(cfg),
+		if bp, ok := args["baseline"].(string); ok && bp != "" {
+			if set, berr := baseline.Load(bp); berr == nil {
+				set.Filter(res)
+			}
 		}
-		if store, cerr := cache.Open(opts); cerr == nil {
-			_, _ = store.Register(root, s.Version)
-		}
+		prep.Result(res)
 	}
 	s.mu.Lock()
 	s.last = res

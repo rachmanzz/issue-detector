@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -16,20 +17,25 @@ func newMCPCmd() *cobra.Command {
 		history  string
 		baseline string
 		noGit    bool
+		force    bool
+		noCache  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Mode MCP server (stdio) untuk AI agent (PRD §3.7)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg := config.Default()
+			loaded, _, err := config.LoadProject(root, "")
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			cfg := config.ApplyGlobalCache(loaded)
 			cfg.NoGit = noGit
-			cfg = config.ApplyGlobalCache(cfg)
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			srv := &mcp.Server{
 				Root: root, Config: cfg, BaselinePath: baseline, HistoryPath: history,
-				Version: version.Version, Log: logger,
+				Version: version.Version, Log: logger, Force: force, NoCache: noCache,
 			}
-			return srv.ServeStdio(cmd.Context(), os.Stdin, os.Stdout)
+			return srv.ServeStdio(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
 	fl := cmd.Flags()
@@ -37,5 +43,7 @@ func newMCPCmd() *cobra.Command {
 	fl.StringVar(&history, "history", ".issue-detector-history.db", "path history SQLite")
 	fl.StringVar(&baseline, "baseline", DefaultBaselineFile, "path baseline")
 	fl.BoolVar(&noGit, "no-git", false, "lewati analisis kesehatan git")
+	fl.BoolVar(&force, "force", false, "abaikan hasil cache, paksa scan ulang (tetap refresh cache)")
+	fl.BoolVar(&noCache, "no-cache", false, "nonaktifkan cache sesi/hasil")
 	return cmd
 }

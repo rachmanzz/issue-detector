@@ -12,6 +12,10 @@ import (
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
+	// Keep the session cache out of the developer's real ~/.issues_detector so
+	// tool scans (TestToolScan) don't pollute the user's registry with temp paths.
+	t.Setenv("ISSUE_DETECTOR_HOME", t.TempDir())
+	t.Setenv("ISSUE_DETECTOR_CACHE_DIR", t.TempDir())
 	return &Server{Root: t.TempDir(), Config: config.Default(), BaselinePath: filepath.Join(t.TempDir(), "b.json"), Version: "0.1.0"}
 }
 

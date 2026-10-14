@@ -60,6 +60,7 @@ func newInitCmd() *cobra.Command {
 func writeDefaultConfig() error {
 	content := `# issue-detector konfigurasi (PRD §6/§7)
 # Nilai default ditampilkan; hapus baris untuk memakai bawaan.
+# Alternatif: issue-detector.json (skema sama, format JSON) di root yang di-scan.
 
 jobs: 0                 # worker; 0 = NumCPU
 sub_worker: 5           # fan-out sub-worker per file
@@ -68,7 +69,8 @@ timeout: 0s             # batas durasi scan (0 = tak terbatas)
 fail_on: none           # none|low|medium|high|critical
 severity_min: ""        # minimum severity dilaporkan
 categories: []          # kategori aktif (kosong = semua)
-ignore: []              # pola ignore tambahan (globs)
+ignore: []              # pola ignore tambahan (globs), mis. ["**/*_test.go"]
+skip: []                # alias untuk ignore (file/pola yang di-skip)
 remote: ""              # git URL untuk clone
 base: ""                # delta scan: ref git
 diff: ""                # delta scan: file patch
@@ -76,16 +78,23 @@ no_git: false           # lewati analisis git
 rules: []               # rule YAML eksternal
 rules_dir: .issue-detector/rules
 
-# AI enrichment (Mode B) — nonaktif secara default
-ai:
-  enabled: false
-  provider: openai      # openai = protokol OpenAI-compatible (Ollama/vLLM/OpenRouter/Azure/...)
-  model: ""             # default per provider; WAJIB bila base_url diisi
-  base_url: ""          # server OpenAI-compatible apa pun (key opsional utk server lokal)
-  api_key_env: ""       # nama env var key (default OPENAI_API_KEY/GEMINI_API_KEY)
-  max_findings: 25
-  budget_tokens: 100000
-  # cache_dir: (default: ~/.issues_detector/ai-cache)
+# AI enrichment (Mode B) — default mengikuti config per-user.
+# SENGAJA dikomentari: nilai kosong/false di config project akan menimpa
+# (clobber) config per-user ~/.issues_detector/issue-detector.yaml. Biarkan
+# terkomentari agar provider/model/base_url/enabled mewarisi per-user; buka
+# komentar hanya bila ingin menimpa AI khusus project ini.
+#
+# ai:
+#   enabled: true
+#   provider: openai      # openai = protokol OpenAI-compatible (Ollama/vLLM/…)
+#   model: ""             # default per provider; WAJIB bila base_url diisi
+#   base_url: ""          # server OpenAI-compatible apa pun (key opsional utk lokal)
+#   api_key_env: ""       # env var key (default OPENAI_API_KEY/GEMINI_API_KEY)
+#   max_findings: 25
+#   budget_tokens: 100000
+#   only: false           # true = AI-detector (--ai-only)
+#   max_files: 200        # batas file dikirim ke AI saat --ai-only
+#   # cache_dir: (default: ~/.issues_detector/ai-cache)
 
 # Session/change cache (PRD §10) — semua state tool ada di ~/.issues_detector
 cache:

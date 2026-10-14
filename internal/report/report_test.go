@@ -54,6 +54,26 @@ func TestWriteText(t *testing.T) {
 	}
 }
 
+func TestWriteTextAISection(t *testing.T) {
+	res := sampleResult()
+	res.AISummary = "risiko sedang pada perubahan"
+	res.Findings = append(res.Findings, model.Finding{
+		RuleID: "AI-SECURITY", Category: model.CategorySecurity, Severity: model.SeverityHigh,
+		Title: "Hardcoded secret", File: "a.go", Line: 3, Snippet: "key = \"x\"",
+		Source: model.SourceAI,
+	})
+	var buf bytes.Buffer
+	if err := WriteText(&buf, res); err != nil {
+		t.Fatal(err)
+	}
+	s := buf.String()
+	for _, want := range []string{"AI summary: risiko sedang", "AI findings (1", "Hardcoded secret"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("text missing %q\n%s", want, s)
+		}
+	}
+}
+
 func TestExitFor(t *testing.T) {
 	res := sampleResult()
 

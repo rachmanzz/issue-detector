@@ -207,6 +207,29 @@ type ScanResult struct {
 	Summary       Summary      `json:"summary"`
 	Findings      []Finding    `json:"findings"`
 	Dependencies  []Dependency `json:"dependencies,omitempty"`
+	// AISummary is the optional narrative produced by AI-detector mode
+	// (--ai-only, PRD §3.2). Empty for deterministic-only scans.
+	AISummary string `json:"ai_summary,omitempty"`
+}
+
+// LineRange is an inclusive 1-based line range (used for partial AI payloads).
+type LineRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// AIFile is a source file offered to an AI detector (PRD §3.2 AI-only mode).
+// Content is the plain text; Language is the detected language (may be unknown).
+// ID is a stable content-addressed handle (<relpath>#<hash>) the model can echo
+// back to request the full content (repush); Ranges/Full describe whether the
+// detector should send the whole file or only the changed excerpts.
+type AIFile struct {
+	RelPath  string      `json:"rel_path"`
+	Content  string      `json:"-"`
+	Language Language    `json:"language"`
+	ID       string      `json:"id,omitempty"`
+	Full     bool        `json:"full,omitempty"`
+	Ranges   []LineRange `json:"ranges,omitempty"`
 }
 
 // Dependency is a package discovered from a manifest/lockfile (PRD §4.6).

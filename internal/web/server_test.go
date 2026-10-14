@@ -42,7 +42,7 @@ func TestTokenAuth(t *testing.T) {
 func TestScanEngineResult(t *testing.T) {
 	root := t.TempDir()
 	srv := New(Options{Root: root})
-	res, err := srv.scan(context.Background(), nil)
+	res, err := srv.scan(context.Background(), nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

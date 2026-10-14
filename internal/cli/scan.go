@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/rachmanzz/issue-detector/internal/adapter"
 	"github.com/rachmanzz/issue-detector/internal/ai"
 	"github.com/rachmanzz/issue-detector/internal/baseline"
-	"github.com/rachmanzz/issue-detector/internal/cache"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/delta"
 	"github.com/rachmanzz/issue-detector/internal/deps"
@@ -23,6 +21,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/sbom"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
+	"github.com/rachmanzz/issue-detector/internal/scanrun"
 	"github.com/rachmanzz/issue-detector/internal/score"
 	"github.com/rachmanzz/issue-detector/internal/sign"
 	"github.com/rachmanzz/issue-detector/internal/version"
@@ -57,6 +56,7 @@ func newScanCmd() *cobra.Command {
 		adapterBox  string
 		noAdapters  bool
 		aiOn        bool
+		aiOnly      bool
 		aiProvider  string
 		aiModel     string
 		aiBaseURL   string
@@ -69,6 +69,7 @@ func newScanCmd() *cobra.Command {
 		keyringPath string
 		historyPath string
 		noCache     bool
+		force       bool
 		webOn       bool
 		webPort     int
 	)
@@ -84,23 +85,15 @@ func newScanCmd() *cobra.Command {
 				root = args[0]
 			}
 
-			cfg := config.Default()
-			if cfgPath == "" {
-				for _, name := range []string{config.FileName, "issue-detector.yml"} {
-					auto := filepath.Join(root, name)
-					if _, err := os.Stat(auto); err == nil {
-						cfgPath = auto
-						break
-					}
-				}
-			}
-			loaded, err := config.Load(cfgPath, cfgPath != "")
+			// Project config: JSON (lowest) then .yml then .yaml merged, so YAML
+			// overrides JSON; an explicit --config is loaded alone (PRD §7.2).
+			loaded, cfgPath, err := config.LoadProject(root, cfgPath)
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
 			// Cache settings default to the per-user global config so they stay
 			// out of the scanned project.
-			cfg = config.ApplyGlobalCache(loaded)
+			cfg := config.ApplyGlobalCache(loaded)
 
 			// Flag menimpa YAML hanya bila eksplisit di-set (agar config dipakai).
 			if remote != "" {
@@ -182,7 +175,7 @@ func newScanCmd() *cobra.Command {
 			if cfgPath != "" {
 				logger.Info("config dimuat", "path", cfgPath, "ai_enabled", cfg.AI.Enabled)
 			} else {
-				logger.Info("config: default (tidak ada file issue-detector.yaml/.yml)")
+				logger.Info("config: default (tidak ada issue-detector.yaml/.yml/.json)")
 			}
 
 			// Delta scan (PRD §3.4): restrict findings to changed lines.
@@ -218,64 +211,9 @@ func newScanCmd() *cobra.Command {
 				}
 			}
 
-			res, err := scanner.Scan(cmd.Context(), scanner.Options{
-				Root:       root,
-				Config:     cfg,
-				Filter:     filter,
-				Log:        logger,
-				Delta:      deltaSet,
-				ExtraRules: extraRules,
-			})
-			if err != nil {
-				logger.Error("scan failed", "error", err)
-				return exit(report.ExitScanError)
-			}
-
-			// CVE lookup for discovered dependencies (PRD §4.6). Network; degrade
-			// gracefully when offline.
-			if !noDeps && len(res.Dependencies) > 0 {
-				client := deps.NewClient()
-				if osvEndpoint != "" {
-					client.BaseURL = osvEndpoint
-				}
-				cveFindings, err := client.Lookup(cmd.Context(), res.Dependencies)
-				if err != nil {
-					logger.Warn("osv lookup gagal; lanjut tanpa CVE", "err", err)
-				} else if len(cveFindings) > 0 {
-					mergeFindings(res, cveFindings)
-				}
-			}
-
-			// Optional external adapters (PRD §6.1/§6.2). No-op when absent.
-			if !noAdapters {
-				af := adapter.Run(cmd.Context(), adapters, adapter.Options{
-					Root: root, Sandbox: adapter.Sandbox(adapterBox),
-				})
-				if len(af) > 0 {
-					mergeFindings(res, af)
-				}
-			}
-
-			// Optional WASM rule plugins (PRD §6.5).
-			if len(pluginPaths) > 0 {
-				plugins := plugin.Discover(pluginPaths)
-				if pf := plugin.Run(cmd.Context(), root, plugins); len(pf) > 0 {
-					mergeFindings(res, pf)
-				}
-			}
-
-			// Baseline: suppress findings already accepted (PRD §11 M3).
-			if baselineF != "" {
-				set, err := baseline.Load(baselineF)
-				if err != nil {
-					return fmt.Errorf("baseline: %w", err)
-				}
-				if n := set.Filter(res); n > 0 {
-					logger.Info("baseline suppressed findings", "count", n, "file", baselineF)
-				}
-			}
-
-			// Optional AI enrichment (PRD §6.3 Mode B). Config `ai:` block + flags.
+			// AI config is resolved before the scan so AI-detector mode
+			// (--ai-only) can supply the scanner a detector, and enrichment
+			// (--ai) reuses the same client afterwards (PRD §3.2/§6.3).
 			aiCfg := cfg.AI
 			if aiOn {
 				aiCfg.Enabled = true
@@ -298,57 +236,137 @@ func newScanCmd() *cobra.Command {
 			if aiCacheDir != "" {
 				aiCfg.CacheDir = aiCacheDir
 			}
-			if aiCfg.Enabled {
-				provider := aiCfg.Provider
-				if provider == "" {
-					provider = "openai"
-				}
-				enr, err := ai.New(ai.Config{
-					Provider: provider, Model: aiCfg.Model, BaseURL: aiCfg.BaseURL,
-					APIKey:      aiAPIKey(aiCfg, provider),
-					MaxFindings: aiCfg.MaxFindings, BudgetTokens: aiCfg.BudgetTokens,
-					CacheDir: aiCfg.CacheDir,
-				})
-				if err != nil {
-					// Error level: tetap terlihat meski --quiet, agar tidak silent.
-					logger.Error("AI diaktifkan tapi dilewati", "err", err)
-				} else {
-					cand := ai.Candidates(res.Findings)
-					logger.Info("AI enrichment", "kandidat_high_critical", cand,
-						"provider", provider, "model", aiCfg.Model)
-					n, eerr := enr.Enrich(cmd.Context(), res)
-					if eerr != nil {
-						logger.Error("AI enrichment gagal (endpoint/key?)", "err", eerr, "enriched", n)
-					} else if n > 0 {
-						logger.Info("AI enrichment selesai", "enriched", n)
-					} else {
-						logger.Info("AI enrichment: tidak ada temuan high/critical untuk di-enrich")
+			if aiOnly {
+				aiCfg.Only = true
+			}
+			aiOnly = aiCfg.Only
+
+			var aiProviderName string
+			var enr *ai.Enricher
+			var detector scanner.AIDetector
+			if aiCfg.Enabled || aiOnly {
+				e, provider, aerr := newEnricher(aiCfg)
+				aiProviderName = provider
+				if aerr != nil {
+					if aiOnly {
+						// AI-only has no fallback detector: fail loudly.
+						logger.Error("AI-only diaktifkan tapi gagal init", "err", aerr)
+						return exit(report.ExitScanError)
 					}
+					logger.Error("AI diaktifkan tapi dilewati", "err", aerr)
+				} else {
+					enr = e
+					detector = e
 				}
 			}
 
-			// Session/change cache (PRD §10): record commits + uncommitted file
-			// hashes for this project so later scans can detect changes. Skipped
-			// for remote clones (their root is a transient temp dir) and when
-			// --no-cache is set.
-			if cfg.Remote == "" && !noCache && cacheEnabled(cfg.Cache) {
-				opts := cache.Options{
-					Mode:        cfg.Cache.Mode,
-					Path:        cfg.Cache.Path,
-					MaxItems:    cfg.Cache.MaxItems,
-					RuleSetHash: scanner.RulesetFingerprint(cfg),
+			// Session/result cache + incremental AI base (PRD §10) via the shared
+			// scanrun package so CLI/web/MCP share identical semantics; explicit
+			// --base/--diff is passed through and never advances the ledger marker.
+			prep := scanrun.Prepare(cmd.Context(), scanrun.Options{
+				Root:          root,
+				Config:        cfg,
+				Filter:        filter,
+				Log:           logger,
+				AIOnly:        aiOnly,
+				Detector:      detector,
+				AIEnabled:     aiCfg.Enabled,
+				ExplicitDelta: deltaSet,
+				Force:         force,
+				NoCache:       noCache,
+				Version:       version.Version,
+			})
+			deltaSet = prep.Delta
+
+			// A fresh cached result (if any) is served directly, skipping the
+			// pipeline; otherwise the scan runs with the prepared delta.
+			var res *model.ScanResult
+			served := prep.Cached != nil
+			if served {
+				res = prep.Cached
+			}
+
+			if !served {
+				res, err = scanner.Scan(cmd.Context(), scanner.Options{
+					Root:       root,
+					Config:     cfg,
+					Filter:     filter,
+					Log:        logger,
+					Delta:      deltaSet,
+					ExtraRules: extraRules,
+					AIOnly:     aiOnly,
+					Detector:   detector,
+				})
+				if err != nil {
+					logger.Error("scan failed", "error", err)
+					return exit(report.ExitScanError)
 				}
-				if store, cerr := cache.Open(opts); cerr != nil {
-					logger.Warn("cache: gagal membuka", "err", cerr)
-				} else if cres, rerr := store.Register(root, version.Version); rerr != nil {
-					logger.Warn("cache: gagal register", "err", rerr, "dir", store.Dir())
-				} else if cres.Skipped {
-					logger.Info("cache: tidak ada perubahan", "dir", store.Dir())
-				} else {
-					logger.Info("cache: sesi terdaftar", "dir", store.Dir(),
-						"commit_baru", len(cres.NewCommits), "file_berubah", len(cres.Changed))
+
+				// CVE lookup for discovered dependencies (PRD §4.6). Network;
+				// degrade gracefully when offline.
+				if !aiOnly && !noDeps && len(res.Dependencies) > 0 {
+					client := deps.NewClient()
+					if osvEndpoint != "" {
+						client.BaseURL = osvEndpoint
+					}
+					cveFindings, err := client.Lookup(cmd.Context(), res.Dependencies)
+					if err != nil {
+						logger.Warn("osv lookup gagal; lanjut tanpa CVE", "err", err)
+					} else if len(cveFindings) > 0 {
+						mergeFindings(res, cveFindings)
+					}
+				}
+
+				// Optional external adapters (PRD §6.1/§6.2). No-op when absent.
+				if !aiOnly && !noAdapters {
+					af := adapter.Run(cmd.Context(), adapters, adapter.Options{
+						Root: root, Sandbox: adapter.Sandbox(adapterBox),
+					})
+					if len(af) > 0 {
+						mergeFindings(res, af)
+					}
+				}
+
+				// Optional WASM rule plugins (PRD §6.5).
+				if !aiOnly && len(pluginPaths) > 0 {
+					plugins := plugin.Discover(pluginPaths)
+					if pf := plugin.Run(cmd.Context(), root, plugins); len(pf) > 0 {
+						mergeFindings(res, pf)
+					}
+				}
+
+			}
+
+			// Baseline: suppress findings already accepted (PRD §11 M3).
+			if baselineF != "" {
+				set, err := baseline.Load(baselineF)
+				if err != nil {
+					return fmt.Errorf("baseline: %w", err)
+				}
+				if n := set.Filter(res); n > 0 {
+					logger.Info("baseline suppressed findings", "count", n, "file", baselineF)
 				}
 			}
+
+			// Optional AI enrichment (PRD §6.3 Mode B). Skipped in AI-only mode
+			// where the model already produced the findings.
+			if enr != nil && !aiOnly {
+				cand := ai.Candidates(res.Findings)
+				logger.Info("AI enrichment", "kandidat_high_critical", cand,
+					"provider", aiProviderName, "model", aiCfg.Model)
+				n, eerr := enr.Enrich(cmd.Context(), res)
+				if eerr != nil {
+					logger.Error("AI enrichment gagal (endpoint/key?)", "err", eerr, "enriched", n)
+				} else if n > 0 {
+					logger.Info("AI enrichment selesai", "enriched", n)
+				} else {
+					logger.Info("AI enrichment: tidak ada temuan high/critical untuk di-enrich")
+				}
+			}
+
+			// Refresh the session cache (result + change ledger, PRD §10). No-op
+			// when the result was served; delta scans are not persisted.
+			prep.Result(res)
 
 			// Optional history snapshot for watch/trend (PRD §11 M7).
 			if historyPath != "" {
@@ -412,6 +430,7 @@ func newScanCmd() *cobra.Command {
 				srv := web.New(web.Options{
 					Root: root, Config: cfg, HistoryPath: historyPath,
 					BaselinePath: baselineF, Log: logger,
+					AIOnly: aiOnly, Detector: detector,
 				})
 				logger.Info("web UI", "url", fmt.Sprintf("http://127.0.0.1:%d", webPort))
 				return srv.Listen("127.0.0.1", webPort)
@@ -430,7 +449,7 @@ func newScanCmd() *cobra.Command {
 	fl.StringVar(&categories, "categories", "", "kategori dipisah koma (default semua)")
 	fl.StringVar(&severityMin, "severity-min", "", "severity minimum dilaporkan: low|medium|high|critical")
 	fl.StringVar(&failOn, "fail-on", "", "gate exit code: none|low|medium|high|critical")
-	fl.StringVar(&cfgPath, "config", "", "path config YAML (default <root>/"+config.FileName+")")
+	fl.StringVar(&cfgPath, "config", "", "path config YAML/JSON (default <root>/issue-detector.yaml|.yml|.json)")
 	fl.StringVar(&remote, "remote", "", "clone git URL terlebih dahulu, scan di cache dir (root dipakai sebagai cache dir)")
 	fl.IntVar(&jobs, "jobs", 0, "jumlah worker (default NumCPU)")
 	fl.IntVar(&subWorker, "sub-worker-limit", 0, "fan-out sub-worker per file (default 5)")
@@ -450,10 +469,11 @@ func newScanCmd() *cobra.Command {
 	fl.StringVar(&adapterBox, "adapter-sandbox", "default", "sandbox adapter: none|default|strict")
 	fl.BoolVar(&noAdapters, "no-adapters", false, "lewati adapter eksternal")
 	fl.BoolVar(&aiOn, "ai", false, "aktifkan AI enrichment (Mode B); butuh API key env")
+	fl.BoolVar(&aiOnly, "ai-only", false, "mode AI-detector: AI menemukan isu sendiri, rule engine dilewati (PRD §3.2)")
 	fl.StringVar(&aiProvider, "ai-provider", "", "provider AI: openai|gemini (default config/`openai`)")
 	fl.StringVar(&aiModel, "ai-model", "", "nama model AI (default per provider; WAJIB bila --ai-base-url)")
 	fl.StringVar(&aiBaseURL, "ai-base-url", "", "override base URL provider AI (server OpenAI-compatible apa pun)")
-	fl.IntVar(&aiMax, "ai-max-findings", 0, "maksimum temuan di-enrich (default config/25)")
+	fl.IntVar(&aiMax, "ai-max-findings", 0, "maksimum temuan AI (enrich atau --ai-only; default config/25)")
 	fl.IntVar(&aiBudget, "ai-budget-tokens", 0, "budget token AI (default config/100000)")
 	fl.StringVar(&aiCacheDir, "ai-cache-dir", "", "direktori cache AI (default ~/.issues_detector/ai-cache)")
 	fl.StringArrayVar(&pluginPaths, "plugin", nil, "file/direktori plugin WASM (.wasm; bisa diulang)")
@@ -461,16 +481,12 @@ func newScanCmd() *cobra.Command {
 	fl.BoolVar(&requireSig, "require-signature", false, "wajibkan tanda tangan valid untuk pack")
 	fl.StringVar(&keyringPath, "pack-keyring", "", "keyring ed25519 (baris base64 public key)")
 	fl.StringVar(&historyPath, "history", "", "simpan snapshot ke database history SQLite (PRD §11 M7)")
-	fl.BoolVar(&noCache, "no-cache", false, "jangan tulis cache sesi (untuk CI paranoid)")
+	fl.BoolVar(&noCache, "no-cache", false, "jangan baca/tulis cache sesi (untuk CI paranoid)")
+	fl.BoolVar(&force, "force", false, "paksa scan ulang: abaikan hasil cache (tetap memperbarui cache)")
 	fl.BoolVar(&webOn, "web", false, "jalankan Mode Web interaktif setelah scan (PRD §3.6)")
 	fl.IntVar(&webPort, "web-port", 8088, "port Mode Web")
 
 	return cmd
-}
-
-// cacheEnabled reports whether the session cache is active (nil = enabled).
-func cacheEnabled(c config.CacheConfig) bool {
-	return c.Enabled == nil || *c.Enabled
 }
 
 // mergeFindings appends extra findings (e.g. CVE) and re-derives the summary.
@@ -483,6 +499,22 @@ func mergeFindings(res *model.ScanResult, extra []model.Finding) {
 	for _, f := range res.Findings {
 		res.Summary.BySeverity[f.Severity]++
 	}
+}
+
+// newEnricher builds an AI client from a resolved AIConfig, defaulting the
+// provider and resolving the API key. Returns the client and provider name.
+func newEnricher(aiCfg config.AIConfig) (*ai.Enricher, string, error) {
+	provider := aiCfg.Provider
+	if provider == "" {
+		provider = "openai"
+	}
+	e, err := ai.New(ai.Config{
+		Provider: provider, Model: aiCfg.Model, BaseURL: aiCfg.BaseURL,
+		APIKey:      aiAPIKey(aiCfg, provider),
+		MaxFindings: aiCfg.MaxFindings, BudgetTokens: aiCfg.BudgetTokens,
+		CacheDir: aiCfg.CacheDir,
+	})
+	return e, provider, err
 }
 
 // aiAPIKey resolves the provider API key: literal api_key > env var named by

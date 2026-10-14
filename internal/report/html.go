@@ -35,6 +35,9 @@ code{background:#161b22;padding:1px 5px;border-radius:4px}
 .file{color:#8b949e}.fix{color:#7ee787}.refs a{color:#58a6ff;display:block}
 .summary span{margin-right:14px}
 .badge{font-size:11px;background:#1f3a5f;color:#d8e9ff;border-radius:8px;padding:1px 6px;margin-left:6px}
+.badge.ai{background:#3d2c63;color:#e2d6ff}
+.ai-summary{background:#161b22;border:1px solid #3d2c63;border-radius:8px;padding:10px 14px;margin:14px 0}
+.ai-summary h2{margin:0 0 6px;font-size:14px;color:#c9b6ff}
 </style>
 </head>
 <body>
@@ -45,6 +48,7 @@ code{background:#161b22;padding:1px 5px;border-radius:4px}
   <span>findings: {{.Summary.Findings}}</span>
   {{range $s, $n := .Summary.BySeverity}}<span class="sev {{sevClass $s}}">{{$s}} {{$n}}</span>{{end}}
 </div>
+{{if .AISummary}}<div class="ai-summary"><h2>AI summary</h2><div>{{.AISummary}}</div></div>{{end}}
 <h2>Findings</h2>
 {{if not .Findings}}<p>No findings.</p>{{end}}
 {{if .Findings}}
@@ -53,7 +57,7 @@ code{background:#161b22;padding:1px 5px;border-radius:4px}
 <tbody>
 {{range .Findings}}
 <tr>
-  <td><span class="sev {{sevClass .Severity}}">{{.Severity}}</span></td>
+  <td><span class="sev {{sevClass .Severity}}">{{.Severity}}</span>{{if eq .Source "ai"}} <span class="badge ai">AI</span>{{end}}</td>
   <td><code>{{.RuleID}}</code><div class="file">{{.Category}}</div></td>
   <td class="file">{{.File}}:{{.Line}}{{if .InDiff}} <span class="badge">in diff</span>{{end}}</td>
   <td>

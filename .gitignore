@@ -28,3 +28,4 @@ internal/testdata/
 # Local config may contain secrets (AI api_key) — never commit
 issue-detector.yaml
 issue-detector.yml
+issue-detector.json

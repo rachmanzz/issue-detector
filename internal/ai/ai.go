@@ -20,7 +20,7 @@ import (
 )
 
 // PromptVersion bumps when the prompt/response contract changes (cache key).
-const PromptVersion = "1"
+const PromptVersion = "5"
 
 // Config configures enrichment.
 type Config struct {
@@ -33,11 +33,14 @@ type Config struct {
 	CacheDir     string
 }
 
-// Enricher performs AI enrichment with redaction, cache and budget.
+// Enricher performs AI enrichment with redaction, cache and budget. It also
+// implements AI-detector mode (Detect) which reuses the same provider, cache
+// directory and token budget.
 type Enricher struct {
 	cfg      Config
 	provider Provider
 	cache    *cache
+	dcache   *strCache
 	used     int
 }
 
@@ -75,7 +78,12 @@ func New(cfg Config) (*Enricher, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Enricher{cfg: cfg, provider: p, cache: loadCache(cfg.CacheDir)}, nil
+	return &Enricher{
+		cfg:      cfg,
+		provider: p,
+		cache:    loadCache(cfg.CacheDir),
+		dcache:   loadStrCache(filepath.Join(cfg.CacheDir, "ai-detect-cache.json")),
+	}, nil
 }
 
 type enrichOut struct {
@@ -91,7 +99,7 @@ func Probe(ctx context.Context, cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.provider.Complete(ctx, "Reply with exactly: ok")
+	return e.provider.Complete(ctx, "Reply with exactly: ok", false)
 }
 
 // Candidates counts findings that are eligible for enrichment (high/critical,
@@ -164,7 +172,7 @@ func (e *Enricher) cached(ctx context.Context, f model.Finding, prompt string) (
 	if out, ok := e.cache.get(key); ok {
 		return out, nil
 	}
-	raw, err := e.provider.Complete(ctx, prompt)
+	raw, err := e.provider.Complete(ctx, prompt, true)
 	if err != nil {
 		return enrichOut{}, err
 	}
@@ -232,6 +240,45 @@ func (c *cache) put(k string, v enrichOut) {
 }
 
 func (c *cache) save() {
+	if !c.dirty {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(c.path), 0o755)
+	if b, err := json.MarshalIndent(c.data, "", "  "); err == nil {
+		_ = os.WriteFile(c.path, b, 0o644)
+	}
+	c.dirty = false
+}
+
+// strCache is a tiny JSON-backed key→string store (raw model responses for
+// AI-detector mode, keyed by content hash so repeated scans don't pay twice).
+type strCache struct {
+	path  string
+	data  map[string]string
+	dirty bool
+}
+
+func loadStrCache(path string) *strCache {
+	c := &strCache{path: path, data: map[string]string{}}
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &c.data)
+	}
+	return c
+}
+
+func (c *strCache) get(k string) (string, bool) {
+	v, ok := c.data[k]
+	return v, ok
+}
+
+func (c *strCache) put(k, v string) {
+	if _, ok := c.data[k]; !ok {
+		c.dirty = true
+	}
+	c.data[k] = v
+}
+
+func (c *strCache) save() {
 	if !c.dirty {
 		return
 	}

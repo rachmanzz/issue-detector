@@ -47,17 +47,25 @@ func WriteText(w io.Writer, res *model.ScanResult) error {
 	fmt.Fprintf(&b, "%s v%s (scan %s)\n", capitalize(res.Tool.Name), res.Tool.Version, shortID(res.ScanID))
 	b.WriteString(strings.Repeat("─", 56) + "\n")
 
-	if len(res.Findings) == 0 {
+	if res.AISummary != "" {
+		fmt.Fprintf(&b, "\nAI summary: %s\n", res.AISummary)
+	}
+
+	deterministic, aiFindings := splitBySource(res.Findings)
+	if len(deterministic) == 0 && len(aiFindings) == 0 {
 		b.WriteString("\nNo findings.\n")
 	}
 
-	for _, f := range res.Findings {
-		fmt.Fprintf(&b, "\n%s  %-8s  %s:%-4d  %s\n",
-			strings.ToUpper(string(f.Severity)), f.Category, f.File, f.Line, f.Title)
-		fmt.Fprintf(&b, "       %s\n", clip(f.Snippet, 80))
-		fmt.Fprintf(&b, "       confidence=%.2f  source=%s  rule=%s\n", f.Confidence, f.Source, f.RuleID)
-		if f.FixHint != "" {
-			fmt.Fprintf(&b, "       fix: %s\n", f.FixHint)
+	for _, f := range deterministic {
+		writeFinding(&b, f)
+	}
+
+	if len(aiFindings) > 0 {
+		b.WriteString("\n" + strings.Repeat("─", 56) + "\n")
+		fmt.Fprintf(&b, "AI findings (%d, advisory — tidak memengaruhi exit code)\n", len(aiFindings))
+		b.WriteString(strings.Repeat("─", 56) + "\n")
+		for _, f := range aiFindings {
+			writeFinding(&b, f)
 		}
 	}
 
@@ -100,6 +108,30 @@ func ExitFor(res *model.ScanResult, failOn model.Severity) int {
 		}
 	}
 	return ExitOK
+}
+
+// writeFinding renders one finding block.
+func writeFinding(b *strings.Builder, f model.Finding) {
+	fmt.Fprintf(b, "\n%s  %-8s  %s:%-4d  %s\n",
+		strings.ToUpper(string(f.Severity)), f.Category, f.File, f.Line, f.Title)
+	fmt.Fprintf(b, "       %s\n", clip(f.Snippet, 80))
+	fmt.Fprintf(b, "       confidence=%.2f  source=%s  rule=%s\n", f.Confidence, f.Source, f.RuleID)
+	if f.FixHint != "" {
+		fmt.Fprintf(b, "       fix: %s\n", f.FixHint)
+	}
+}
+
+// splitBySource partitions findings into deterministic (rule/git/…) and
+// AI-sourced, preserving order. AI findings are shown separately (advisory).
+func splitBySource(fs []model.Finding) (det, ai []model.Finding) {
+	for _, f := range fs {
+		if f.Source == model.SourceAI {
+			ai = append(ai, f)
+		} else {
+			det = append(det, f)
+		}
+	}
+	return det, ai
 }
 
 func shortID(id string) string {

@@ -33,22 +33,11 @@ func newAITestCmd() *cobra.Command {
 		Use:   "test",
 		Short: "Uji koneksi AI (kirim satu prompt) dan tampilkan hasilnya",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg := config.Default()
-			if cfgPath == "" {
-				for _, name := range []string{config.FileName, "issue-detector.yml"} {
-					p := root + string(os.PathSeparator) + name
-					if _, err := os.Stat(p); err == nil {
-						cfgPath = p
-						break
-					}
-				}
+			cfg, cfgPath, err := config.LoadProject(root, cfgPath)
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
 			}
 			if cfgPath != "" {
-				loaded, err := config.Load(cfgPath, true)
-				if err != nil {
-					return fmt.Errorf("config: %w", err)
-				}
-				cfg = loaded
 				fmt.Fprintf(os.Stderr, "config: %s\n", cfgPath)
 			} else {
 				fmt.Fprintln(os.Stderr, "config: tidak ada (pakai flag/env)")
@@ -87,7 +76,7 @@ func newAITestCmd() *cobra.Command {
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVar(&cfgPath, "config", "", "path config YAML")
+	fl.StringVar(&cfgPath, "config", "", "path config JSON/YAML")
 	fl.StringVar(&root, "root", ".", "root untuk cari config default")
 	fl.StringVar(&provider, "provider", "", "openai|gemini")
 	fl.StringVar(&model, "model", "", "nama model")

@@ -41,6 +41,17 @@ type Options struct {
 	ExtraRules []*rules.Rule
 	// Delta, when non-nil, restricts reported findings to changed lines (PRD §3.4).
 	Delta *delta.Set
+	// AIOnly switches to AI-detector mode (PRD §3.2): the Detector identifies
+	// issues itself and the deterministic pipeline is skipped entirely.
+	AIOnly bool
+	// Detector is required when AIOnly is set.
+	Detector AIDetector
+}
+
+// AIDetector identifies issues directly from file content (AI-only mode). It
+// returns the findings, an optional narrative summary, and an error.
+type AIDetector interface {
+	Detect(ctx context.Context, files []model.AIFile) ([]model.Finding, string, error)
 }
 
 // Progress is emitted after each settled file.
@@ -167,6 +178,11 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 
 	cfg := s.opts.Config
 	scanID := uuid.NewString()
+
+	// AI-detector mode: skip the deterministic pipeline entirely (PRD §3.2).
+	if s.opts.AIOnly {
+		return s.scanAI(ctx, root, entries, scanID, start)
+	}
 
 	jobs := cfg.Jobs
 	if jobs < 1 {

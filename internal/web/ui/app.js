@@ -8,12 +8,15 @@ function render(){
   const rows = $('rows'); rows.innerHTML = '';
   const f = last.findings || [];
   $('summary').textContent = `scan ${last.scan_id} · ${last.summary.findings} findings · ${last.summary.files_enumerated} files · ${last.duration_ms} ms`;
+  const ai = last.ai_summary || '';
+  $('aisummary').hidden = !ai;
+  $('aisummarytext').textContent = ai;
   for(const x of f){
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><span class="sev ${sevClass(x.severity)}">${x.severity}</span></td>
       <td class="score">${(x.priority_score||0).toFixed(1)}<div class="bar"><i style="width:${x.priority_score||0}%"></i></div></td>
-      <td><code>${x.rule_id}</code><div class="file">${x.category} · ${x.source}${x.in_diff?' <span class="badge">in diff</span>':''}</div></td>
+      <td><code>${x.rule_id}</code><div class="file">${x.category} · ${x.source}${x.source==='ai'?' <span class="badge ai">AI</span>':''}${x.in_diff?' <span class="badge">in diff</span>':''}</div></td>
       <td class="file">${x.file}:${x.line}</td>
       <td><strong>${x.title}</strong>
         <div>${x.message||''}</div>

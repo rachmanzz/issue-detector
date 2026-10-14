@@ -11,9 +11,12 @@ import (
 	"time"
 )
 
-// Provider completes a single prompt and returns the raw text response.
+// Provider completes a single prompt and returns the raw text response. When
+// jsonMode is set, the provider asks the model for a strict JSON object (many
+// relay models otherwise reply with prose reasoning instead of the requested
+// JSON, which would silently yield no findings).
 type Provider interface {
-	Complete(ctx context.Context, prompt string) (string, error)
+	Complete(ctx context.Context, prompt string, jsonMode bool) (string, error)
 }
 
 func newProvider(cfg Config) (Provider, error) {
@@ -22,7 +25,10 @@ func newProvider(cfg Config) (Provider, error) {
 	if cfg.APIKey == "" && cfg.BaseURL == "" {
 		return nil, fmt.Errorf("ai: API key kosong (set env key, atau --ai-base-url untuk server lokal)")
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
+	// Local/relay OpenAI-compatible endpoints can take well over a minute to
+	// return a large detection completion; 60s proved too tight and made chunks
+	// fail spuriously. 180s bounds a hung connection without aborting real work.
+	client := &http.Client{Timeout: 180 * time.Second}
 	switch cfg.Provider {
 	case "openai", "":
 		base := cfg.BaseURL
@@ -56,14 +62,18 @@ type openaiProvider struct {
 	key   string
 }
 
-func (p *openaiProvider) Complete(ctx context.Context, prompt string) (string, error) {
-	body, _ := json.Marshal(map[string]any{
+func (p *openaiProvider) Complete(ctx context.Context, prompt string, jsonMode bool) (string, error) {
+	reqBody := map[string]any{
 		"model": p.model,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
 		"temperature": 0,
-	})
+	}
+	if jsonMode {
+		reqBody["response_format"] = map[string]string{"type": "json_object"}
+	}
+	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.base+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -104,13 +114,17 @@ type geminiProvider struct {
 	key   string
 }
 
-func (p *geminiProvider) Complete(ctx context.Context, prompt string) (string, error) {
+func (p *geminiProvider) Complete(ctx context.Context, prompt string, jsonMode bool) (string, error) {
 	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", p.base, p.model)
+	gen := map[string]any{"temperature": 0}
+	if jsonMode {
+		gen["responseMimeType"] = "application/json"
+	}
 	body, _ := json.Marshal(map[string]any{
 		"contents": []map[string]any{
 			{"parts": []map[string]string{{"text": prompt}}},
 		},
-		"generationConfig": map[string]any{"temperature": 0},
+		"generationConfig": gen,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

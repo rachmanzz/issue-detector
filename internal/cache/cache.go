@@ -39,12 +39,14 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/rachmanzz/issue-detector/internal/fetcher"
+	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/parser"
 )
 
 const (
 	registryFile    = "session_registery.json"
 	registerarFile  = "registerar.json"
+	resultFile      = "result.json"
 	sessionPrefix   = "session_"
 	lockName        = ".lock"
 	maxCommits      = 200
@@ -124,6 +126,7 @@ type Item struct {
 	RegisterarTime string         `json:"registerar_time"`
 	CommitIDs      []string       `json:"commit_ids"`
 	UncommitFiles  []UncommitFile `json:"uncommit_files"`
+	Head           string         `json:"head,omitempty"` // HEAD commit at scan time (git only)
 	RuleSetHash    string         `json:"rule_set_hash,omitempty"`
 	ToolVersion    string         `json:"tool_version,omitempty"`
 }
@@ -230,6 +233,7 @@ func (s *Store) Register(projectPath, appVersion string) (Result, error) {
 		RegisterarTime: now.Format(time.RFC3339),
 		CommitIDs:      commits,
 		UncommitFiles:  files,
+		Head:           headCommit(abs),
 		RuleSetHash:    s.ruleSetHash,
 		ToolVersion:    appVersion,
 	})
@@ -277,6 +281,17 @@ func (s *Store) LastItem(projectPath string) (Item, bool, error) {
 	return rr.Items[len(rr.Items)-1], true, nil
 }
 
+// LastHead returns the HEAD commit recorded for projectPath's most recent item.
+// ok is false when there is no prior item or the root is not a git repo (no
+// HEAD was recorded). Consumers use it as the base for incremental diffs.
+func (s *Store) LastHead(projectPath string) (head string, ok bool, err error) {
+	it, has, err := s.LastItem(projectPath)
+	if err != nil || !has {
+		return "", false, err
+	}
+	return it.Head, it.Head != "", nil
+}
+
 // Changed reports the delta of the working tree vs the last recorded item
 // without writing anything: new commits since the last scan and files that are
 // new/changed/removed. This is the read side consumers use for incremental work.
@@ -301,6 +316,72 @@ func (s *Store) Changed(projectPath string) ([]string, []UncommitFile, error) {
 		prev = rr.Items[len(rr.Items)-1].UncommitFiles
 	}
 	return commits, diffFiles(prev, files), nil
+}
+
+// SaveResult persists the last full scan result for projectPath inside its
+// session directory (result.json). Best-effort: callers may log and ignore the
+// error without failing the scan.
+func (s *Store) SaveResult(projectPath string, res model.ScanResult) error {
+	dir, err := s.sessionDir(projectPath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writeJSON(filepath.Join(dir, resultFile), res)
+}
+
+// LoadResult returns the last saved scan result for projectPath, if any.
+func (s *Store) LoadResult(projectPath string) (model.ScanResult, bool, error) {
+	dir, err := s.sessionDir(projectPath)
+	if err != nil {
+		return model.ScanResult{}, false, err
+	}
+	var res model.ScanResult
+	ok, err := readJSON(filepath.Join(dir, resultFile), &res)
+	if err != nil {
+		return model.ScanResult{}, false, err
+	}
+	return res, ok, nil
+}
+
+// Fresh reports whether the saved result for projectPath is still valid and can
+// be served without rescanning: a result is stored, the last recorded item used
+// the same rule-set fingerprint and tool version, and nothing changed since (no
+// new commits, no added/changed/removed files). A false verdict, even with a
+// nil error, always means "rescan".
+func (s *Store) Fresh(projectPath, ruleSetHash, toolVersion string) (bool, error) {
+	dir, err := s.sessionDir(projectPath)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(filepath.Join(dir, resultFile)); err != nil {
+		return false, nil
+	}
+	last, ok, err := s.LastItem(projectPath)
+	if err != nil || !ok {
+		return false, err
+	}
+	if last.RuleSetHash != ruleSetHash || last.ToolVersion != toolVersion {
+		return false, nil
+	}
+	commits, changed, err := s.Changed(projectPath)
+	if err != nil {
+		return false, err
+	}
+	return len(commits) == 0 && len(changed) == 0, nil
+}
+
+// sessionDir returns the absolute session directory for projectPath.
+func (s *Store) sessionDir(projectPath string) (string, error) {
+	abs, err := filepath.Abs(projectPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(s.dir, sessionPrefix+SessionID(abs)), nil
 }
 
 // diffFiles returns files whose hash differs from prev (new/changed) plus files
@@ -373,6 +454,20 @@ func collectChanges(root string, known map[string]bool) ([]string, []UncommitFil
 		return nil, hashAll(root)
 	}
 	return newCommits(repo, known), uncommitted(repo, root)
+}
+
+// headCommit returns the current HEAD commit hash of root, or "" when root is
+// not a git repository (or has no commits yet).
+func headCommit(root string) string {
+	repo, err := git.PlainOpen(root)
+	if err != nil {
+		return ""
+	}
+	ref, err := repo.Head()
+	if err != nil {
+		return ""
+	}
+	return ref.Hash().String()
 }
 
 var errStop = errors.New("stop")

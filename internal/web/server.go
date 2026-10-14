@@ -24,6 +24,8 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/rules"
 	"github.com/rachmanzz/issue-detector/internal/scanner"
+	"github.com/rachmanzz/issue-detector/internal/scanrun"
+	"github.com/rachmanzz/issue-detector/internal/version"
 )
 
 // Options configures the web server.
@@ -38,6 +40,14 @@ type Options struct {
 	Token string
 	// MCP, when set, exposes POST /mcp (MCP http transport, PRD §3.7).
 	MCP *mcp.Server
+	// AIOnly makes the web scan run AI-detector mode; Detector must be non-nil
+	// when set (PRD §3.2).
+	AIOnly   bool
+	Detector scanner.AIDetector
+	// Force bypasses serving a cached result (still refreshes it); NoCache
+	// disables the session/result cache entirely (PRD §10).
+	Force   bool
+	NoCache bool
 }
 
 // Server holds shared state for the web layer.
@@ -137,15 +147,38 @@ func (s *Server) authGuard(c fiber.Ctx) error {
 	return fiber.NewError(fiber.StatusUnauthorized, "token tidak valid")
 }
 
-func (s *Server) scan(ctx context.Context, onProgress func(scanner.Progress)) (*model.ScanResult, error) {
-	res, err := scanner.Scan(ctx, scanner.Options{
+func (s *Server) scan(ctx context.Context, onProgress func(scanner.Progress), force bool) (*model.ScanResult, error) {
+	// Share the CLI's cache semantics (PRD §10): serve an unchanged cached
+	// result and run AI-only scans incrementally from the last checked commit.
+	prep := scanrun.Prepare(ctx, scanrun.Options{
 		Root:       s.opts.Root,
 		Config:     s.opts.Config,
 		Log:        s.log,
+		AIOnly:     s.opts.AIOnly,
+		Detector:   s.opts.Detector,
+		AIEnabled:  s.opts.Config.AI.Enabled,
 		OnProgress: onProgress,
+		Force:      force || s.opts.Force,
+		NoCache:    s.opts.NoCache,
+		Version:    version.Version,
 	})
-	if err != nil {
-		return nil, err
+
+	res := prep.Cached
+	if res == nil {
+		var err error
+		res, err = scanner.Scan(ctx, scanner.Options{
+			Root:       s.opts.Root,
+			Config:     s.opts.Config,
+			Log:        s.log,
+			OnProgress: onProgress,
+			Delta:      prep.Delta,
+			AIOnly:     s.opts.AIOnly,
+			Detector:   s.opts.Detector,
+		})
+		if err != nil {
+			return nil, err
+		}
+		prep.Result(res)
 	}
 	s.mu.Lock()
 	s.last = res
@@ -164,7 +197,9 @@ func (s *Server) handleAppJS(c fiber.Ctx) error {
 }
 
 func (s *Server) handleScan(c fiber.Ctx) error {
-	res, err := s.scan(c.Context(), nil)
+	// ?force=1 (or --force at startup) bypasses serving a cached result.
+	force := c.Query("force") == "1" || c.Query("force") == "true"
+	res, err := s.scan(c.Context(), nil, force)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
@@ -187,7 +222,7 @@ func (s *Server) handleEvents(c fiber.Ctx) error {
 		emit("start", map[string]any{"root": s.opts.Root})
 		res, err := s.scan(c.Context(), func(p scanner.Progress) {
 			emit("progress", map[string]any{"scanned": p.Scanned, "total": p.Total})
-		})
+		}, false)
 		if err != nil {
 			emit("error", map[string]any{"error": err.Error()})
 			return

@@ -58,6 +58,30 @@ func (s *Set) Contains(path string, line int) bool {
 	return false
 }
 
+// Paths returns the sorted union of changed file paths (both partially changed
+// and wholly new files). A nil set returns nil (meaning "no delta filter").
+func (s *Set) Paths() []string {
+	if s == nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for p := range s.Files {
+		set[p] = true
+	}
+	for p := range s.New {
+		set[p] = true
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // FromBase computes the change set between the working tree at root and base.
 // base may be a branch, tag, commit hash, or a relative revision (HEAD~2).
 // Uncommitted edits on disk are included, which is what the agent loop needs.

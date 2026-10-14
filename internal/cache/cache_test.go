@@ -11,6 +11,8 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"github.com/rachmanzz/issue-detector/internal/model"
 )
 
 func fixedNow() func() time.Time {
@@ -173,6 +175,22 @@ func TestRegisterGit(t *testing.T) {
 	}
 	if fileHash(item.UncommitFiles, "new.go") == "" {
 		t.Errorf("new.go should be tracked as untracked: %+v", item.UncommitFiles)
+	}
+
+	// LastHead reflects the committed HEAD (used as the incremental diff base).
+	head, ok, err := store.LastHead(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || head == "" {
+		t.Fatalf("LastHead = %q, ok=%v; want the committed HEAD", head, ok)
+	}
+	ref, err := repo.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head != ref.Hash().String() {
+		t.Errorf("LastHead = %q, want %q", head, ref.Hash().String())
 	}
 
 	// Second register: no new commits, same uncommitted set → skipped.
@@ -356,6 +374,73 @@ func TestConcurrentRegister(t *testing.T) {
 	}
 	if reg.Registery[0].ID != SessionID(project) {
 		t.Fatalf("wrong session entry: %+v", reg.Registery)
+	}
+}
+
+func TestResultRoundtripAndFresh(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "issue-detector")
+	store, err := Open(Options{Mode: "local", ExePath: exe, Now: fixedNow(), RuleSetHash: "rs1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No result stored yet: not fresh, nothing to load.
+	if fresh, ferr := store.Fresh(project, "rs1", "v"); ferr != nil || fresh {
+		t.Fatalf("fresh before save = %v (err %v), want false", fresh, ferr)
+	}
+	if _, ok, lerr := store.LoadResult(project); lerr != nil || ok {
+		t.Fatalf("load before save: ok=%v err=%v, want false", ok, lerr)
+	}
+
+	if _, err := store.Register(project, "v"); err != nil {
+		t.Fatal(err)
+	}
+	want := model.ScanResult{ScanID: "s1", Root: project, Findings: []model.Finding{{RuleID: "r1"}}}
+	if err := store.SaveResult(project, want); err != nil {
+		t.Fatal(err)
+	}
+
+	if fresh, ferr := store.Fresh(project, "rs1", "v"); ferr != nil || !fresh {
+		t.Fatalf("fresh after save = %v (err %v), want true", fresh, ferr)
+	}
+	got, ok, err := store.LoadResult(project)
+	if err != nil || !ok {
+		t.Fatalf("load: ok=%v err=%v", ok, err)
+	}
+	if got.ScanID != "s1" || len(got.Findings) != 1 || got.Findings[0].RuleID != "r1" {
+		t.Fatalf("loaded result mismatch: %+v", got)
+	}
+
+	// A different rule-set or tool version invalidates the cache.
+	if fresh, _ := store.Fresh(project, "rs2", "v"); fresh {
+		t.Error("fresh with changed rule-set should be false")
+	}
+	if fresh, _ := store.Fresh(project, "rs1", "v2"); fresh {
+		t.Error("fresh with changed tool version should be false")
+	}
+
+	// A content change invalidates the cache until re-recorded.
+	if err := os.WriteFile(filepath.Join(project, "a.go"), []byte("package a\n\nvar X = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if fresh, _ := store.Fresh(project, "rs1", "v"); fresh {
+		t.Error("fresh with changed file should be false")
+	}
+	if _, err := store.Register(project, "v"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveResult(project, model.ScanResult{ScanID: "s2", Root: project}); err != nil {
+		t.Fatal(err)
+	}
+	if fresh, ferr := store.Fresh(project, "rs1", "v"); ferr != nil || !fresh {
+		t.Fatalf("fresh after re-record = %v (err %v), want true", fresh, ferr)
+	}
+	if got, _, _ := store.LoadResult(project); got.ScanID != "s2" {
+		t.Errorf("expected latest result s2, got %q", got.ScanID)
 	}
 }
 
