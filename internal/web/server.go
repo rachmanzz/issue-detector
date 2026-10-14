@@ -75,6 +75,12 @@ func (s *Server) App() *fiber.App {
 
 	app.Use(s.securityHeaders)
 	app.Use(s.originGuard)
+
+	// Liveness/readiness probes are registered before authGuard so orchestrators
+	// (k8s) can probe without a token (PRD §3.6 ops).
+	app.Get("/healthz", s.handleHealth)
+	app.Get("/readyz", s.handleReady)
+
 	app.Use(s.authGuard)
 
 	app.Get("/", s.handleIndex)
@@ -194,6 +200,27 @@ func (s *Server) handleIndex(c fiber.Ctx) error {
 func (s *Server) handleAppJS(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/javascript; charset=utf-8")
 	return c.SendString(appJS)
+}
+
+// handleHealth is a liveness probe: the process is up (no auth, no dependencies).
+func (s *Server) handleHealth(c fiber.Ctx) error {
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// handleReady is a readiness probe: dependencies needed to serve are usable.
+// The history DB is the only optional external state; when configured it must
+// open, otherwise a scan would fail. It is not created here (read-only check).
+func (s *Server) handleReady(c fiber.Ctx) error {
+	if s.opts.HistoryPath != "" {
+		store, err := history.Open(s.opts.HistoryPath)
+		if err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"status": "unavailable", "reason": "history: " + err.Error(),
+			})
+		}
+		_ = store.Close()
+	}
+	return c.JSON(fiber.Map{"status": "ready", "root": s.opts.Root})
 }
 
 func (s *Server) handleScan(c fiber.Ctx) error {

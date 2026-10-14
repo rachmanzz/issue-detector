@@ -1,0 +1,34 @@
+{
+  "schema_version": "1",
+  "tool": {
+    "name": "issue-detector",
+    "version": "0.1.0"
+  },
+  "scan_id": "abc-123",
+  "root": "",
+  "duration_ms": 42,
+  "summary": {
+    "files_enumerated": 2,
+    "files_parsed": 2,
+    "files_skipped": 0,
+    "errors": 0,
+    "findings": 1,
+    "by_severity": {
+      "high": 1
+    }
+  },
+  "findings": [
+    {
+      "rule_id": "GO-TEMP-001",
+      "category": "security",
+      "severity": "high",
+      "title": "Insecure temporary file creation",
+      "message": "",
+      "file": "main.go",
+      "line": 10,
+      "snippet": "f, err := ioutil.TempFile",
+      "confidence": 0.85,
+      "source": "rule"
+    }
+  ]
+}

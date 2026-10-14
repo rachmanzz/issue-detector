@@ -230,7 +230,7 @@ func (s *Server) toolScan(ctx context.Context, args map[string]any) (any, error)
 		}
 		if !noDeps && len(res.Dependencies) > 0 {
 			if cve, cerr := deps.NewClient().Lookup(ctx, res.Dependencies); cerr == nil && len(cve) > 0 {
-				mergeFindings(res, cve)
+				mergeFindings(res, cve, cfg.ScoreWeights)
 			}
 		}
 		if bp, ok := args["baseline"].(string); ok && bp != "" {
@@ -247,10 +247,10 @@ func (s *Server) toolScan(ctx context.Context, args map[string]any) (any, error)
 }
 
 // mergeFindings appends extra findings (CVE) and re-derives summary+score.
-func mergeFindings(res *model.ScanResult, extra []model.Finding) {
+func mergeFindings(res *model.ScanResult, extra []model.Finding, w score.Weights) {
 	res.Findings = append(res.Findings, extra...)
 	model.SortFindings(res.Findings)
-	score.Apply(res.Findings)
+	score.Apply(res.Findings, w)
 	res.Summary.Findings = len(res.Findings)
 	res.Summary.BySeverity = map[model.Severity]int{}
 	for _, f := range res.Findings {

@@ -179,3 +179,21 @@ func TestRuleLabInvalid(t *testing.T) {
 		t.Errorf("invalid rule should 400, got %d", resp.StatusCode)
 	}
 }
+
+// TestHealthEndpoints guards that /healthz and /readyz answer without a token
+// (probes) while other routes still require it.
+func TestHealthEndpoints(t *testing.T) {
+	srv := New(Options{Root: t.TempDir(), Token: "sekret"})
+	app := srv.App()
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		req, _ := http.NewRequest(http.MethodGet, path, nil)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: status %d, want 200", path, resp.StatusCode)
+		}
+	}
+}

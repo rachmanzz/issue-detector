@@ -249,7 +249,7 @@ func newScanCmd() *cobra.Command {
 			var enr *ai.Enricher
 			var detector scanner.AIDetector
 			if aiCfg.Enabled || aiOnly {
-				e, provider, aerr := newEnricher(aiCfg)
+				e, provider, aerr := newEnricher(aiCfg, cfg.ScoreWeights)
 				aiProviderName = provider
 				if aerr != nil {
 					if aiOnly {
@@ -317,7 +317,7 @@ func newScanCmd() *cobra.Command {
 					if err != nil {
 						logger.Warn("osv lookup gagal; lanjut tanpa CVE", "err", err)
 					} else if len(cveFindings) > 0 {
-						mergeFindings(res, cveFindings)
+						mergeFindings(res, cveFindings, cfg.ScoreWeights)
 					}
 				}
 
@@ -327,7 +327,7 @@ func newScanCmd() *cobra.Command {
 						Root: root, Sandbox: adapter.Sandbox(adapterBox),
 					})
 					if len(af) > 0 {
-						mergeFindings(res, af)
+						mergeFindings(res, af, cfg.ScoreWeights)
 					}
 				}
 
@@ -335,7 +335,7 @@ func newScanCmd() *cobra.Command {
 				if !aiOnly && len(pluginPaths) > 0 {
 					plugins := plugin.Discover(pluginPaths)
 					if pf := plugin.Run(cmd.Context(), root, plugins); len(pf) > 0 {
-						mergeFindings(res, pf)
+						mergeFindings(res, pf, cfg.ScoreWeights)
 					}
 				}
 
@@ -505,10 +505,10 @@ func newScanCmd() *cobra.Command {
 }
 
 // mergeFindings appends extra findings (e.g. CVE) and re-derives the summary.
-func mergeFindings(res *model.ScanResult, extra []model.Finding) {
+func mergeFindings(res *model.ScanResult, extra []model.Finding, w score.Weights) {
 	res.Findings = append(res.Findings, extra...)
 	model.SortFindings(res.Findings)
-	score.Apply(res.Findings)
+	score.Apply(res.Findings, w)
 	res.Summary.Findings = len(res.Findings)
 	res.Summary.BySeverity = map[model.Severity]int{}
 	for _, f := range res.Findings {
@@ -518,7 +518,7 @@ func mergeFindings(res *model.ScanResult, extra []model.Finding) {
 
 // newEnricher builds an AI client from a resolved AIConfig, defaulting the
 // provider and resolving the API key. Returns the client and provider name.
-func newEnricher(aiCfg config.AIConfig) (*ai.Enricher, string, error) {
+func newEnricher(aiCfg config.AIConfig, w score.Weights) (*ai.Enricher, string, error) {
 	provider := aiCfg.Provider
 	if provider == "" {
 		provider = "openai"
@@ -527,7 +527,8 @@ func newEnricher(aiCfg config.AIConfig) (*ai.Enricher, string, error) {
 		Provider: provider, Model: aiCfg.Model, BaseURL: aiCfg.BaseURL,
 		APIKey:      aiAPIKey(aiCfg, provider),
 		MaxFindings: aiCfg.MaxFindings, BudgetTokens: aiCfg.BudgetTokens,
-		CacheDir: aiCfg.CacheDir,
+		CacheDir:     aiCfg.CacheDir,
+		ScoreWeights: w,
 	})
 	return e, provider, err
 }

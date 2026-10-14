@@ -96,8 +96,7 @@ func (s *Scanner) scanAI(ctx context.Context, root string, entries []fetcher.Ent
 	}
 	findings = dedup(findings)
 	model.SortFindings(findings)
-	score.SetDefaults(cfg.ScoreWeights)
-	score.Apply(findings)
+	score.Apply(findings, cfg.ScoreWeights)
 
 	sum := model.Summary{FilesEnumerated: len(files), Findings: len(findings)}
 	sum.BySeverity = map[model.Severity]int{}

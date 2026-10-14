@@ -31,6 +31,7 @@ type Config struct {
 	MaxFindings  int // cap findings to enrich
 	BudgetTokens int // approx token budget across the run
 	CacheDir     string
+	ScoreWeights score.Weights // priority-score coefficients (race-free scoring)
 }
 
 // Enricher performs AI enrichment with redaction, cache and budget. It also
@@ -151,7 +152,7 @@ func (e *Enricher) Enrich(ctx context.Context, res *model.ScanResult) (int, erro
 	if len(added) > 0 {
 		res.Findings = append(res.Findings, added...)
 		model.SortFindings(res.Findings)
-		score.Apply(res.Findings)
+		score.Apply(res.Findings, e.cfg.ScoreWeights)
 		res.Summary.Findings = len(res.Findings)
 		res.Summary.BySeverity = map[model.Severity]int{}
 		for _, f := range res.Findings {

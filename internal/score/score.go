@@ -43,12 +43,11 @@ func DefaultWeights() Weights {
 	}
 }
 
-// defaults is the active coefficient set (tunable via config, roast v9).
-var defaults = DefaultWeights()
-
-// SetDefaults installs custom weights; zero fields keep the current default.
-func SetDefaults(w Weights) {
-	d := defaults
+// Resolve returns w with zero fields filled from the defaults, so callers may
+// pass a partial config. It is pure: no package state is mutated, so scoring is
+// safe under concurrent scans (roast v27).
+func Resolve(w Weights) Weights {
+	d := DefaultWeights()
 	if w.Severity != 0 {
 		d.Severity = w.Severity
 	}
@@ -66,12 +65,17 @@ func SetDefaults(w Weights) {
 			d.Category[k] = v
 		}
 	}
-	defaults = d
+	return d
 }
 
-// Score computes a 0–100 priority and a human-readable reason.
-func Score(f model.Finding) (float64, string) {
-	w := defaults
+// Score computes a 0–100 priority and a human-readable reason using w (zero
+// fields fall back to defaults).
+func Score(f model.Finding, w Weights) (float64, string) {
+	return scoreWith(f, Resolve(w))
+}
+
+// scoreWith scores against already-resolved weights.
+func scoreWith(f model.Finding, w Weights) (float64, string) {
 	sev := float64(model.SeverityWeight[f.Severity]) / 4 * w.Severity
 	conf := f.Confidence * w.Confidence
 	cat := w.Category[f.Category]
@@ -103,11 +107,13 @@ func Score(f model.Finding) (float64, string) {
 	return round1(raw), strings.Join(reasons, " ")
 }
 
-// Apply computes and stores the score for every finding, then keeps the
-// result sorted by priority (highest first) with stable tie-breaks.
-func Apply(findings []model.Finding) {
+// Apply computes and stores the score for every finding using w (zero fields
+// fall back to defaults), then keeps the result sorted by priority (highest
+// first) with stable tie-breaks.
+func Apply(findings []model.Finding, w Weights) {
+	rw := Resolve(w)
 	for i := range findings {
-		s, r := Score(findings[i])
+		s, r := scoreWith(findings[i], rw)
 		findings[i].PriorityScore = s
 		findings[i].ScoreReason = r
 	}

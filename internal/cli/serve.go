@@ -86,7 +86,7 @@ func newServeCmd() *cobra.Command {
 				Root: root, Config: cfg, HistoryPath: history, BaselinePath: baseline,
 				Token: uiToken, Log: logger, Force: force, NoCache: noCache,
 			}
-			if enr, _, aerr := newEnricher(aiCfg); aiCfg.Enabled || aiCfg.Only {
+			if enr, _, aerr := newEnricher(aiCfg, cfg.ScoreWeights); aiCfg.Enabled || aiCfg.Only {
 				if aerr != nil {
 					if aiCfg.Only {
 						return fmt.Errorf("ai-only: %w", aerr)

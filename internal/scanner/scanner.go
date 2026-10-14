@@ -287,8 +287,7 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 
 	findings = dedup(findings)
 	model.SortFindings(findings)
-	score.SetDefaults(s.opts.Config.ScoreWeights)
-	score.Apply(findings)
+	score.Apply(findings, s.opts.Config.ScoreWeights)
 	sum.Findings = len(findings)
 	sum.BySeverity = map[model.Severity]int{}
 	for _, f := range findings {
