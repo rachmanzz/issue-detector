@@ -98,6 +98,7 @@ Contoh:
 | `--ai-model` | – | nama model (default per provider) |
 | `--ai-max-findings` | 25 | maksimum temuan di-enrich |
 | `--ai-budget-tokens` | 100000 | budget token AI (perkiraan) |
+| `--ai-format` | `block` | format balasan AI-only: `block` (key=value, tahan output terpotong) \| `json` |
 | `--plugin` | – | plugin WASM (.wasm file/direktori; bisa diulang) |
 | `--pack` | – | rule pack (direktori atau `.tar.gz`; bisa diulang) |
 | `--require-signature` | false | wajibkan tanda tangan valid untuk pack |
@@ -175,6 +176,7 @@ ai:
   max_findings: 25
   budget_tokens: 100000
   cache_dir: .issue-detector-cache
+  format: block           # format respons AI-only: "block" (default, tahan truncate) | "json"
 ```
 
 > Urutan resolusi key: `api_key` (literal) → `api_key_env` (nama env) → `OPENAI_API_KEY`/`GEMINI_API_KEY`. `issue-detector.yaml`/`.yml`/`.json` sudah masuk `.gitignore` — jangan pernah commit key.
@@ -216,6 +218,8 @@ issue-detector scan . --ai-only --since 3
 # ekuivalen eksplisit (--since = --base HEAD~N + --force)
 issue-detector scan . --ai-only --base HEAD~3 --force
 ```
+
+Format respons detektor default **`block`** — blok teks `key=value` (`[finding]` + `line=`/`severity=`/`category=`/`conf=`/`title=`/`message=`/`fix=`) yang lebih tahan terhadap keluaran AI yang terpotong: temuan yang sudah lengkap tetap terbaca walau ekor respons rusak (JSON ter-truncate membuang seluruh balasan). Parser tetap menerima JSON sebagai fallback. Pilih eksplisit dengan `--ai-format json` atau `ai.format: json`.
 
 ### Plugin WASM
 

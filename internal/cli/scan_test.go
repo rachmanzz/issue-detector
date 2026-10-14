@@ -86,8 +86,8 @@ func TestScanAIOnly(t *testing.T) {
 			prompt = body.Messages[len(body.Messages)-1].Content
 		}
 		content := "prioritas: hapus rahasia dari source"
-		if strings.Contains(prompt, "STRICT JSON") {
-			content = `{"findings":[{"line":3,"severity":"critical","category":"secrets","title":"Hardcoded secret","message":"m","fix":"env","confidence":0.9}]}`
+		if strings.Contains(prompt, "[finding]") {
+			content = "[finding]\nline=3\nseverity=critical\ncategory=secrets\nconf=0.9\ntitle=Hardcoded secret\nmessage=m\nfix=env"
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{"message": map[string]string{"content": content}}},
@@ -152,8 +152,8 @@ func TestScanAIOnlyIncrementalFromCache(t *testing.T) {
 			prompt = body.Messages[len(body.Messages)-1].Content
 		}
 		reply := "ringkasan"
-		if strings.Contains(prompt, "STRICT JSON") {
-			reply = `{"findings":[{"line":1,"severity":"high","category":"quality","title":"t","message":"m","confidence":0.7}]}`
+		if strings.Contains(prompt, "[finding]") {
+			reply = "[finding]\nline=1\nseverity=high\ncategory=quality\nconf=0.7\ntitle=t\nmessage=m"
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{"message": map[string]any{"content": reply}}},

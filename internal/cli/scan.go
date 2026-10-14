@@ -67,6 +67,7 @@ func newScanCmd() *cobra.Command {
 		aiMax          int
 		aiBudget       int
 		aiCacheDir     string
+		aiFormat       string
 		pluginPaths    []string
 		packPaths      []string
 		requireSig     bool
@@ -256,6 +257,14 @@ func newScanCmd() *cobra.Command {
 			}
 			if aiCacheDir != "" {
 				aiCfg.CacheDir = aiCacheDir
+			}
+			if aiFormat != "" {
+				switch aiFormat {
+				case "block", "json":
+					aiCfg.Format = aiFormat
+				default:
+					return fmt.Errorf("--ai-format harus \"block\" atau \"json\"")
+				}
 			}
 			if aiOnly {
 				aiCfg.Only = true
@@ -521,6 +530,7 @@ func newScanCmd() *cobra.Command {
 	fl.IntVar(&aiMax, "ai-max-findings", 0, "maksimum temuan AI (enrich atau --ai-only; default config/25)")
 	fl.IntVar(&aiBudget, "ai-budget-tokens", 0, "budget token AI (default config/100000)")
 	fl.StringVar(&aiCacheDir, "ai-cache-dir", "", "direktori cache AI (default ~/.issues_detector/ai-cache)")
+	fl.StringVar(&aiFormat, "ai-format", "", "format respons AI-only: block (default, tahan truncate) | json")
 	fl.StringArrayVar(&pluginPaths, "plugin", nil, "file/direktori plugin WASM (.wasm; bisa diulang)")
 	fl.StringArrayVar(&packPaths, "pack", nil, "rule pack (direktori atau .tar.gz; bisa diulang)")
 	fl.BoolVar(&requireSig, "require-signature", false, "wajibkan tanda tangan valid untuk pack")
@@ -558,6 +568,7 @@ func newEnricher(aiCfg config.AIConfig, w score.Weights) (*ai.Enricher, string, 
 		APIKey:      aiAPIKey(aiCfg, provider),
 		MaxFindings: aiCfg.MaxFindings, BudgetTokens: aiCfg.BudgetTokens,
 		CacheDir:     aiCfg.CacheDir,
+		Format:       aiCfg.Format,
 		ScoreWeights: w,
 	})
 	return e, provider, err

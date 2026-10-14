@@ -28,8 +28,8 @@ func TestDetectMapsLinesAndSummary(t *testing.T) {
 			prompt = req.Messages[len(req.Messages)-1].Content
 		}
 		content := ""
-		if strings.Contains(prompt, "STRICT JSON") {
-			content = `{"findings":[{"line":1,"severity":"high","category":"security","title":"Hardcoded secret","message":"m","fix":"use env","confidence":0.8}]}`
+		if strings.Contains(prompt, "[finding]") {
+			content = "[finding]\nline=1\nseverity=high\ncategory=security\nconf=0.8\ntitle=Hardcoded secret\nmessage=m\nfix=use env"
 		} else {
 			content = "Perubahan menambah risiko sedang; prioritas: rahasia ter-hardcode."
 		}
@@ -98,14 +98,14 @@ func TestDetectRequestFullRepush(t *testing.T) {
 			prompt = req.Messages[len(req.Messages)-1].Content
 		}
 		reply := "ringkasan"
-		if strings.Contains(prompt, "STRICT JSON") {
+		if strings.Contains(prompt, "[finding]") {
 			mu.Lock()
 			prompts = append(prompts, prompt)
 			mu.Unlock()
 			if strings.Contains(prompt, "SECRET_FULL_ONLY") {
-				reply = `{"findings":[{"line":40,"severity":"critical","category":"secrets","title":"leak","message":"m","confidence":0.9}]}`
+				reply = "[finding]\nline=40\nseverity=critical\ncategory=secrets\ntitle=leak\nmessage=m\nconf=0.9"
 			} else {
-				reply = `{"findings":[],"request_full":["a.go#id1"]}`
+				reply = "[request_full]\na.go#id1"
 			}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -209,7 +209,7 @@ func TestExcerptChunksBounded(t *testing.T) {
 // file id, so the request-full repush contract keeps working after chunking.
 func TestDetectPromptCarriesID(t *testing.T) {
 	f := model.AIFile{RelPath: "a/b.go", Language: model.LanguageGo, ID: "a/b.go#deadbeef", Content: "x\ny\n"}
-	p := buildDetectPrompt(f, chunk{start: 1, text: "x\ny"}, true)
+	p := buildDetectPrompt(f, chunk{start: 1, text: "x\ny"}, true, FormatBlock)
 	if !strings.Contains(p, "a/b.go#deadbeef") {
 		t.Errorf("prompt missing file id:\n%s", p)
 	}
@@ -278,6 +278,94 @@ func TestSummarizeFailureIsNotFatal(t *testing.T) {
 	}
 	if len(findings) != 1 {
 		t.Fatalf("detection findings must be kept, got %d", len(findings))
+	}
+}
+
+// TestParseDetectBlock verifies the line-oriented block format: fields, a
+// multi-line continuation, and the [request_full] section.
+func TestParseDetectBlock(t *testing.T) {
+	raw := "[finding]\nline=10\nseverity=high\ncategory=security\nconf=0.7\ntitle=t1\nmessage=m1\nfix=f1\n" +
+		"[finding]\nline=20\nseverity=medium\ntitle=t2\nmessage=line one\nline two of message\n" +
+		"[request_full]\na.go#1\nb.go#2\n"
+	out, err := parseDetect(raw)
+	if err != nil {
+		t.Fatalf("parseDetect: %v", err)
+	}
+	if len(out.Findings) != 2 {
+		t.Fatalf("want 2 findings, got %d", len(out.Findings))
+	}
+	f0 := out.Findings[0]
+	if f0.Line != 10 || f0.Severity != "high" || f0.Category != "security" || f0.Title != "t1" || f0.Fix != "f1" {
+		t.Errorf("finding[0] wrong: %+v", f0)
+	}
+	if f0.Confidence == nil || *f0.Confidence != 0.7 {
+		t.Errorf("confidence = %v, want 0.7", f0.Confidence)
+	}
+	if got := out.Findings[1].Message; got != "line one\nline two of message" {
+		t.Errorf("multi-line message = %q", got)
+	}
+	if len(out.RequestFull) != 2 || out.RequestFull[0] != "a.go#1" {
+		t.Errorf("request_full = %v", out.RequestFull)
+	}
+}
+
+// TestParseDetectBlockTruncatedSalvage verifies a reply cut off mid-block still
+// yields the findings that completed before the truncation (the point of the
+// block format: one bad tail does not discard the whole reply).
+func TestParseDetectBlockTruncatedSalvage(t *testing.T) {
+	raw := "[finding]\nline=3\nseverity=high\ntitle=ok\nmessage=m\n[finding]\nline=9\nsever"
+	out, err := parseDetect(raw)
+	if err != nil {
+		t.Fatalf("truncated block must not error: %v", err)
+	}
+	if len(out.Findings) != 2 {
+		t.Fatalf("want 2 salvaged findings, got %d", len(out.Findings))
+	}
+	if out.Findings[0].Title != "ok" || out.Findings[0].Line != 3 {
+		t.Errorf("first finding wrong: %+v", out.Findings[0])
+	}
+}
+
+// TestParseDetectJSONFallback guards that valid JSON replies still parse even
+// when the block format is the default.
+func TestParseDetectJSONFallback(t *testing.T) {
+	raw := `{"findings":[{"line":1,"severity":"low","title":"j","message":"m"}]}`
+	out, err := parseDetect(raw)
+	if err != nil {
+		t.Fatalf("json fallback failed: %v", err)
+	}
+	if len(out.Findings) != 1 || out.Findings[0].Title != "j" {
+		t.Fatalf("json fallback wrong: %+v", out.Findings)
+	}
+}
+
+// TestParseDetectNoFindingsProse guards that an explicit "no issues" prose
+// reply (common from relay models) is accepted as clean, while other
+// unparseable prose stays an error (never silently dropped as clean).
+func TestParseDetectNoFindingsProse(t *testing.T) {
+	for _, raw := range []string{"No findings.", "no issues", "TIDAK ADA TEMUAN", "(none)", "  none \n"} {
+		out, err := parseDetect(raw)
+		if err != nil {
+			t.Errorf("%q should be clean, got error: %v", raw, err)
+			continue
+		}
+		if len(out.Findings) != 0 || len(out.RequestFull) != 0 {
+			t.Errorf("%q should yield no findings, got %+v", raw, out)
+		}
+	}
+	if _, err := parseDetect("Here is my reasoning about the code..."); err == nil {
+		t.Errorf("ambiguous prose must remain an error, not treated as clean")
+	}
+}
+
+// TestParseDetectEmptyIsClean verifies an empty reply means "no findings".
+func TestParseDetectEmptyIsClean(t *testing.T) {
+	out, err := parseDetect("   \n  ")
+	if err != nil {
+		t.Fatalf("empty reply must be clean, got error %v", err)
+	}
+	if len(out.Findings) != 0 {
+		t.Fatalf("want 0 findings, got %d", len(out.Findings))
 	}
 }
 

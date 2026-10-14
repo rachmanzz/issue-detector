@@ -20,7 +20,7 @@ import (
 )
 
 // PromptVersion bumps when the prompt/response contract changes (cache key).
-const PromptVersion = "6"
+const PromptVersion = "8"
 
 // Config configures enrichment.
 type Config struct {
@@ -31,7 +31,27 @@ type Config struct {
 	MaxFindings  int // cap findings to enrich
 	BudgetTokens int // approx token budget across the run
 	CacheDir     string
+	// Format selects the AI-only detector reply format: "block" (default,
+	// line-oriented key=value blocks — resilient to truncated replies) or
+	// "json". The parser always accepts both as a fallback.
+	Format       string
 	ScoreWeights score.Weights // priority-score coefficients (race-free scoring)
+}
+
+// FormatBlock and FormatJSON are the accepted AI detector reply formats.
+const (
+	FormatBlock = "block"
+	FormatJSON  = "json"
+)
+
+// normalizeFormat maps arbitrary input to a supported format (default block).
+func normalizeFormat(f string) string {
+	switch strings.ToLower(strings.TrimSpace(f)) {
+	case FormatJSON:
+		return FormatJSON
+	default:
+		return FormatBlock
+	}
 }
 
 // Enricher performs AI enrichment with redaction, cache and budget. It also
@@ -55,6 +75,7 @@ func New(cfg Config) (*Enricher, error) {
 	if cfg.BudgetTokens <= 0 {
 		cfg.BudgetTokens = 100000
 	}
+	cfg.Format = normalizeFormat(cfg.Format)
 	// Anchor the AI cache under the per-user dir so a relative cache_dir can
 	// never write into the scanned project (PRD §7.1). StatePath resolves
 	// relative paths against ~/.issues_detector, not the CWD.

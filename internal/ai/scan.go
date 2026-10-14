@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/rachmanzz/issue-detector/internal/model"
@@ -79,7 +80,7 @@ func (e *Enricher) Detect(ctx context.Context, files []model.AIFile) ([]model.Fi
 				if e.used >= e.cfg.BudgetTokens || len(findings) >= e.cfg.MaxFindings {
 					break
 				}
-				prompt := buildDetectPrompt(file, ch, allowReq)
+				prompt := buildDetectPrompt(file, ch, allowReq, e.cfg.Format)
 				cost := approxTokens(prompt)
 				if e.used+cost > e.cfg.BudgetTokens {
 					break
@@ -266,13 +267,15 @@ func scaleFindings(file model.AIFile, ch chunk, raw []detectFinding, remaining i
 }
 
 func (e *Enricher) cachedDetect(ctx context.Context, file model.AIFile, ch chunk, prompt string) (detectOut, error) {
-	key := detectKey(e.cfg.Model, file.ID, ch.start, ch.text)
+	key := detectKey(e.cfg.Model, file.ID, ch.start, ch.text, e.cfg.Format)
 	if raw, ok := e.dcache.get(key); ok {
 		return parseDetect(raw)
 	}
-	// jsonMode: relay models otherwise answer with prose reasoning instead of
-	// the strict JSON the detector parses.
-	raw, err := e.provider.Complete(ctx, prompt, true)
+	// jsonMode only for the JSON format: it makes the provider send
+	// response_format=json_object (relay models otherwise answer with prose
+	// reasoning). The block format is plain text, so jsonMode stays off.
+	jsonMode := e.cfg.Format == FormatJSON
+	raw, err := e.provider.Complete(ctx, prompt, jsonMode)
 	if err != nil {
 		return detectOut{}, err
 	}
@@ -349,17 +352,26 @@ func chunkContent(content string) []chunk {
 	return out
 }
 
-func buildDetectPrompt(f model.AIFile, ch chunk, allowRequest bool) string {
+func buildDetectPrompt(f model.AIFile, ch chunk, allowRequest bool, format string) string {
 	var b strings.Builder
 	b.WriteString("You are a strict senior security and correctness reviewer. Report ONLY issues with concrete, demonstrable impact that a reviewer would block a pull request for.\n")
 	b.WriteString("Report: exploitable security vulnerabilities, real correctness bugs, exposed secrets, injection, resource/leaks, and data-loss risks.\n")
 	b.WriteString("Do NOT report cosmetic or low-value items: naming, typos, formatting, style, comments/documentation, dead or unused code, code duplication, refactor or \"consider\"/\"prefer\"/\"could\" suggestions, or test-style nits.\n")
-	b.WriteString("If an item is only stylistic, speculative, or you are unsure it causes real harm, OMIT it. Do not invent issues. An empty findings array is a valid and common answer.\n")
+	b.WriteString("If an item is only stylistic, speculative, or you are unsure it causes real harm, OMIT it. Do not invent issues. No findings is a valid and common answer.\n")
 	b.WriteString("Severity must be low|medium|high|critical (never \"info\"): use \"low\" only for a real, concrete defect — not for a nitpick.\n")
-	b.WriteString(`Return STRICT JSON only (no markdown): {"findings":[{"line":<int>,"severity":"low|medium|high|critical","category":"security|bug|quality|secrets|dependency|posture|git|todo","title":"...","message":"...","fix":"...","confidence":<0..1>}],"request_full":["<file id>"]}` + "\n")
 	b.WriteString("Line numbers are 1-based relative to the snippet below (the first line shown is line 1).\n")
-	if allowRequest {
-		fmt.Fprintf(&b, "The snippet is an EXCERPT of changed lines only. If it is insufficient, add the file id%s to request_full to receive the whole file; otherwise omit request_full.\n", fileIDs(f))
+	if format == FormatJSON {
+		b.WriteString(`Return STRICT JSON only (no markdown): {"findings":[{"line":<int>,"severity":"low|medium|high|critical","category":"security|bug|quality|secrets|dependency|posture|git|todo","title":"...","message":"...","fix":"...","confidence":<0..1>}],"request_full":["<file id>"]}` + "\n")
+		if allowRequest {
+			fmt.Fprintf(&b, "The snippet is an EXCERPT of changed lines only. If it is insufficient, add the file id%s to request_full to receive the whole file; otherwise omit request_full.\n", fileIDs(f))
+		}
+	} else {
+		b.WriteString("Return findings as PLAIN TEXT blocks, not JSON, no markdown fences. Emit one block per issue and nothing else:\n")
+		b.WriteString("[finding]\nline=<int>\nseverity=<low|medium|high|critical>\ncategory=<security|bug|quality|secrets|dependency|posture|git|todo>\nconf=<0..1>\ntitle=<short title>\nmessage=<1-2 sentences>\nfix=<short remediation>\n")
+		b.WriteString("Do not quote values and do not add fields beyond those listed. If there are no issues, reply with exactly: (none).\n")
+		if allowRequest {
+			fmt.Fprintf(&b, "The snippet is an EXCERPT of changed lines only. If it is insufficient, append a block headed [request_full] listing the file id%s, one per line; otherwise omit it.\n", fileIDs(f))
+		}
 	}
 	fmt.Fprintf(&b, "File: %s (id: %s, language: %s)\n", f.RelPath, f.ID, langLabel(f.Language))
 	b.WriteString("```\n")
@@ -376,29 +388,209 @@ func fileIDs(f model.AIFile) string {
 	return fmt.Sprintf(" %q", f.ID)
 }
 
-// parseDetect parses a detector reply. A non-JSON reply is an error, never an
-// empty (or prose) result: an unparseable answer means "not reviewed", not
-// "clean" — the caller must not advance the checked marker.
+// parseDetect parses a detector reply. It accepts the JSON format and the
+// line-oriented block format (JSON is tried first). An empty reply means "no
+// findings". A reply that is neither valid JSON nor a recognizable block is an
+// error, never a silent clean result: an unparseable answer means "not
+// reviewed", not "clean" — the caller must not advance the checked marker.
 func parseDetect(raw string) (detectOut, error) {
-	s := strings.TrimSpace(raw)
-	// Strip markdown fences if the model added them.
+	s := stripFences(strings.TrimSpace(raw))
+	if s == "" {
+		return detectOut{}, nil
+	}
+	if out, ok := parseDetectJSON(s); ok {
+		return out, nil
+	}
+	if out, ok := parseDetectBlock(s); ok {
+		return out, nil
+	}
+	// Relay models often answer a clean result in prose ("No findings.")
+	// instead of an empty block. Accept only an explicit no-findings statement;
+	// any other unparseable reply stays an error (so real issues are never
+	// silently dropped as "clean").
+	if isNoFindings(s) {
+		return detectOut{}, nil
+	}
+	return detectOut{}, fmt.Errorf("ai: respons tak dapat diparse (bukan JSON/blok): %s", truncate(s, 120))
+}
+
+// isNoFindings reports whether a reply is an explicit "no issues" statement.
+func isNoFindings(s string) bool {
+	t := strings.ToLower(strings.TrimSpace(s))
+	t = strings.Trim(t, ".! \t\r\n")
+	switch t {
+	case "no findings", "no issues", "no problems", "none", "(none)", "n/a", "na",
+		"tidak ada temuan", "tidak ada masalah", "tidak ditemukan temuan":
+		return true
+	}
+	return false
+}
+
+// stripFences removes an optional ```/```json fence the model may have added.
+func stripFences(s string) string {
 	if i := strings.Index(s, "```"); i >= 0 {
 		s = s[i+3:]
 		if j := strings.Index(s, "```"); j >= 0 {
 			s = s[:j]
 		}
-		s = strings.TrimSpace(strings.TrimPrefix(s, "json"))
+		s = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s), "json"))
 	}
-	if i := strings.Index(s, "{"); i >= 0 {
-		if j := strings.LastIndex(s, "}"); j > i {
-			s = s[i : j+1]
-		}
+	return s
+}
+
+// parseDetectJSON parses the JSON detector format. ok=false means the reply is
+// not a JSON object (it may still be a valid block reply).
+func parseDetectJSON(s string) (detectOut, bool) {
+	i := strings.Index(s, "{")
+	if i < 0 {
+		return detectOut{}, false
+	}
+	body := s[i:]
+	if j := strings.LastIndex(body, "}"); j >= 0 {
+		body = body[:j+1]
 	}
 	var out detectOut
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
-		return detectOut{}, fmt.Errorf("ai: respons detektor bukan JSON valid: %w", err)
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		return detectOut{}, false
 	}
-	return out, nil
+	return out, true
+}
+
+// parseDetectBlock parses the line-oriented block format:
+//
+//	[finding]
+//	line=12
+//	severity=high
+//	...
+//	[request_full]
+//	<file id>
+//
+// It is deliberately lenient: unknown keys are ignored, a `key=value` seen
+// before any header implicitly starts a finding, and a line that is neither a
+// header nor a `key=value` is appended to the previous field (so multi-line
+// messages survive). Returns ok=false when no block structure is recognized.
+func parseDetectBlock(s string) (detectOut, bool) {
+	var out detectOut
+	var cur *detectFinding
+	curField := ""
+	inReq := false
+	seen := false
+	flush := func() {
+		if cur != nil {
+			out.Findings = append(out.Findings, *cur)
+			cur = nil
+		}
+	}
+	for _, rawLine := range strings.Split(s, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		if h, isHeader := blockHeader(line); isHeader {
+			flush()
+			seen = true
+			if h == "request_full" {
+				inReq = true
+			} else {
+				inReq = false
+				cur = &detectFinding{}
+				curField = ""
+			}
+			continue
+		}
+		if inReq {
+			out.RequestFull = append(out.RequestFull, line)
+			continue
+		}
+		if key, val, ok := splitKeyVal(line); ok {
+			if cur == nil {
+				cur = &detectFinding{}
+			}
+			curField = assignDetectField(cur, key, val)
+			seen = true
+			continue
+		}
+		if cur != nil && curField != "" {
+			appendDetectField(cur, curField, line)
+			seen = true
+		}
+	}
+	flush()
+	return out, seen
+}
+
+// blockHeader reports whether a line is a `[name]` section header and returns
+// its normalized name ("finding" or "request_full").
+func blockHeader(line string) (string, bool) {
+	if len(line) < 3 || line[0] != '[' || line[len(line)-1] != ']' {
+		return "", false
+	}
+	name := strings.ToLower(strings.TrimSpace(line[1 : len(line)-1]))
+	switch {
+	case strings.Contains(name, "request"):
+		return "request_full", true
+	case strings.Contains(name, "finding") || strings.Contains(name, "issue"):
+		return "finding", true
+	}
+	return "", false
+}
+
+// splitKeyVal splits a `key=value` line (trims surrounding spaces).
+func splitKeyVal(line string) (key, val string, ok bool) {
+	i := strings.Index(line, "=")
+	if i <= 0 {
+		return "", "", false
+	}
+	key = strings.ToLower(strings.TrimSpace(line[:i]))
+	if key == "" {
+		return "", "", false
+	}
+	return key, strings.TrimSpace(line[i+1:]), true
+}
+
+// assignDetectField stores one field and returns its canonical name (used to
+// continue multi-line values); an unknown key returns "".
+func assignDetectField(f *detectFinding, key, val string) string {
+	switch key {
+	case "line", "ln", "lineno", "line_number":
+		if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			f.Line = n
+		}
+		return "line"
+	case "severity", "sev":
+		f.Severity = val
+		return "severity"
+	case "category", "cat":
+		f.Category = val
+		return "category"
+	case "title", "name":
+		f.Title = val
+		return "title"
+	case "message", "body", "msg", "description":
+		f.Message = val
+		return "message"
+	case "fix", "fix_hint", "remediation":
+		f.Fix = val
+		return "fix"
+	case "conf", "confidence", "score":
+		if v, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil {
+			f.Confidence = &v
+		}
+		return "confidence"
+	default:
+		return ""
+	}
+}
+
+func appendDetectField(f *detectFinding, field, extra string) {
+	switch field {
+	case "title":
+		f.Title = strings.TrimSpace(f.Title + " " + extra)
+	case "message":
+		f.Message = strings.TrimSpace(f.Message + "\n" + extra)
+	case "fix":
+		f.Fix = strings.TrimSpace(f.Fix + "\n" + extra)
+	}
 }
 
 func normalizeSeverity(s string) model.Severity {
@@ -440,8 +632,8 @@ func dedupFindings(fs []model.Finding) []model.Finding {
 	return out
 }
 
-func detectKey(modelName, id string, start int, text string) string {
-	return hashStr(fmt.Sprintf("%s|%s|detect|%s|%d|%s", modelName, PromptVersion, id, start, text))
+func detectKey(modelName, id string, start int, text, format string) string {
+	return hashStr(fmt.Sprintf("%s|%s|detect|%s|%d|%s|%s", modelName, PromptVersion, id, start, text, format))
 }
 
 func hashStr(s string) string {

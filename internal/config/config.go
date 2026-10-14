@@ -77,6 +77,7 @@ type AIConfig struct {
 	CacheDir     string `yaml:"cache_dir"`
 	Only         bool   `yaml:"only"`      // AI-detector mode (skip rule engine, PRD §3.2)
 	MaxFiles     int    `yaml:"max_files"` // cap file dikirim ke AI pada mode --ai-only
+	Format       string `yaml:"format"`    // format respons AI-only: block (default) | json
 }
 
 // Default returns the baked-in defaults (PRD §10 performa/default flags).
@@ -162,6 +163,9 @@ func mergeAI(base, over AIConfig) AIConfig {
 	}
 	if over.MaxFiles != 0 {
 		base.MaxFiles = over.MaxFiles
+	}
+	if over.Format != "" {
+		base.Format = over.Format
 	}
 	return base
 }

@@ -18,6 +18,12 @@ SemVer. `schema_version` laporan JSON = kontrak output (lihat `internal/version`
   menunggu settle; consumer bersama yang men-trigger handler. Tidak ada
   `RegisterHandler` berulang, tak ada `SetDriver`/`StartConsumer` global, dan
   tak ada serialisasi — beberapa scan paralel aman (mis. `serve`).
+- AI-only (AI-detector): format respons default kini **`block`** — blok teks
+  baris-per-baris (`[finding]` + `line=`/`severity=`/`category=`/`conf=`/
+  `title=`/`message=`/`fix=`) — lebih tahan terhadap keluaran model yang
+  terpotong: temuan yang sudah lengkap tetap terbaca walau ekor balasan rusak
+  (JSON ter-truncate membuang seluruh balasan). Parser tetap menerima JSON
+  sebagai fallback; `PromptVersion` dinaikkan sehingga cache lama tidak dipakai.
 
 ### Added
 - CI `test` workflow: `gofmt`/`build`/`vet`/`go test -race` + artifact coverage.
@@ -30,6 +36,8 @@ SemVer. `schema_version` laporan JSON = kontrak output (lihat `internal/version`
 - Flag `--since N`: re-scan perubahan `N` commit terakhir (basis `HEAD~N`,
   otomatis abaikan cache) — bentuk ringkas dari `--base HEAD~N --force`, mis.
   untuk memaksa scan AI-only mundur lebih jauh dari commit terakhir yang dicek.
+- AI-only: format respons detektor dapat dipilih lewat flag `--ai-format`
+  (`block`|`json`) atau config `ai.format`.
 - Supply chain: semua GitHub Action di-pin ke commit SHA (`supply-chain.yml`
   mem-verifikasi ini di CI); workflow `release.yml` membuat binary multi-OS,
   SBOM, checksum, dan **build provenance bertanda-tangan** (keyless).
