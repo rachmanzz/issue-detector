@@ -96,3 +96,20 @@ func TestLoadRequiresSignature(t *testing.T) {
 		t.Error("expected error when signature required but absent")
 	}
 }
+
+// TestLoadSigWithoutKeyringRejected guards that a pack carrying a .sig but with
+// an empty keyring is refused (never silently accepted unverified).
+func TestLoadSigWithoutKeyringRejected(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	data := makeTarGz(t, map[string]string{"r.yaml": ruleYAML})
+	path := filepath.Join(t.TempDir(), "pack.tar.gz")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".sig", ed25519.Sign(priv, data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, nil, false); err == nil {
+		t.Error("sig present with empty keyring must be rejected")
+	}
+}

@@ -204,11 +204,13 @@ func newScanCmd() *cobra.Command {
 				if keyringPath != "" {
 					ring, err = sign.LoadKeyring(keyringPath)
 					if err != nil {
+						logger.Error("keyring gagal dimuat", "error", err)
 						return fmt.Errorf("keyring: %w", err)
 					}
 				}
 				extraRules, err = pack.LoadMany(packPaths, ring, requireSig)
 				if err != nil {
+					logger.Error("pack gagal dimuat", "error", err)
 					return fmt.Errorf("pack: %w", err)
 				}
 			}

@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,21 +36,28 @@ func Load(path string, keyring []ed25519.PublicKey, requireSig bool) ([]*rules.R
 	if err != nil {
 		return nil, err
 	}
-	if requireSig || len(keyring) > 0 {
-		sigPath := path + ".sig"
-		if _, err := os.Stat(sigPath); err == nil {
-			if !sign.VerifyFile(keyring, data, sigPath) {
-				return nil, fmt.Errorf("pack %q: signature tidak valid", path)
-			}
-		} else if requireSig {
-			return nil, fmt.Errorf("pack %q: tanda tangan tidak ada", path)
+	sigPath := path + ".sig"
+	_, sigErr := os.Stat(sigPath)
+	switch {
+	case sigErr == nil && len(keyring) == 0:
+		// A signature is present but there is no trusted key to check it: refuse
+		// rather than silently accepting an unverified pack.
+		return nil, fmt.Errorf("pack %q: ada %s tetapi keyring kosong", path, filepath.Base(sigPath))
+	case sigErr == nil:
+		if !sign.VerifyFile(keyring, data, sigPath) {
+			return nil, fmt.Errorf("pack %q: signature tidak valid", path)
 		}
+	case requireSig:
+		return nil, fmt.Errorf("pack %q: tanda tangan tidak ada", path)
+	default:
+		slog.Warn("pack dimuat tanpa verifikasi tanda tangan", "pack", path)
 	}
 
 	dir, err := os.MkdirTemp("", "issue-detector-pack-*")
 	if err != nil {
 		return nil, err
 	}
+	defer os.RemoveAll(dir)
 	if err := extractTarGz(data, dir); err != nil {
 		return nil, fmt.Errorf("pack %q: %w", path, err)
 	}
