@@ -105,12 +105,8 @@ func finding(ruleID string, sev model.Severity, title, msg, fix, file string, li
 
 // scanYAML walks the parsed YAML document and reports insecure constructs.
 func scanYAML(rel, content string, workflow bool, k8s bool) []model.Finding {
-	var doc yaml.Node
-	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
-		return nil
-	}
 	var out []model.Finding
-	walkMaps(&doc, func(key, val *yaml.Node) {
+	visit := func(key, val *yaml.Node) {
 		k := strings.ToLower(strings.TrimSpace(key.Value))
 		v := strings.TrimSpace(val.Value)
 
@@ -209,29 +205,47 @@ func scanYAML(rel, content string, workflow bool, k8s bool) []model.Finding {
 					"Hindari mount docker.sock; gunakan socket proxy terbatas.", val.Line, 0.8)
 			}
 		}
-	})
+	}
+	// Decode every document so multi-doc manifests (`---` separated, common for
+	// Kubernetes) are all scanned — yaml.Unmarshal reads only the first.
+	dec := yaml.NewDecoder(strings.NewReader(content))
+	for {
+		var doc yaml.Node
+		if err := dec.Decode(&doc); err != nil {
+			break // io.EOF, or malformed tail: keep findings collected so far
+		}
+		walkMaps(&doc, visit)
+	}
 	return out
 }
 
 // walkMaps visits every mapping (keyNode, valueNode) pair recursively.
 func walkMaps(n *yaml.Node, fn func(key, val *yaml.Node)) {
+	walkMapsSeen(n, fn, map[*yaml.Node]bool{})
+}
+
+// walkMapsSeen is walkMaps with a visited set for alias targets. Each alias
+// target is followed at most once so nested anchors cannot expand
+// exponentially (a YAML "billion laughs" DoS) or recurse forever on cycles.
+func walkMapsSeen(n *yaml.Node, fn func(key, val *yaml.Node), seen map[*yaml.Node]bool) {
 	switch n.Kind {
 	case yaml.DocumentNode:
 		for _, c := range n.Content {
-			walkMaps(c, fn)
+			walkMapsSeen(c, fn, seen)
 		}
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			fn(n.Content[i], n.Content[i+1])
-			walkMaps(n.Content[i+1], fn)
+			walkMapsSeen(n.Content[i+1], fn, seen)
 		}
 	case yaml.SequenceNode:
 		for _, c := range n.Content {
-			walkMaps(c, fn)
+			walkMapsSeen(c, fn, seen)
 		}
 	case yaml.AliasNode:
-		if n.Alias != nil {
-			walkMaps(n.Alias, fn)
+		if n.Alias != nil && !seen[n.Alias] {
+			seen[n.Alias] = true
+			walkMapsSeen(n.Alias, fn, seen)
 		}
 	}
 }
@@ -267,8 +281,6 @@ var ghaSHARe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // --- scanDockerfile: instruction-wise --------------------------------------
 
 var (
-	dockerLatestRe = regexp.MustCompile(`(?i)^FROM\s+\S+`)
-	dockerFromRe   = regexp.MustCompile(`(?i)^FROM\s+(\S+)`)
 	dockerUserRe   = regexp.MustCompile(`(?i)^\s*USER\s+(\S+)`)
 	dockerAddRe    = regexp.MustCompile(`(?i)^\s*ADD\s+https?://`)
 	dockerPipeRe   = regexp.MustCompile(`(?i)^\s*RUN\s+.*(curl|wget)\b[^|]*\|\s*(sh|bash)\b`)
@@ -293,8 +305,10 @@ func scanDockerfile(rel, content string) []model.Finding {
 		if line == "" || yingCommentRe.MatchString(line) {
 			continue
 		}
-		if m := dockerFromRe.FindStringSubmatch(line); m != nil {
-			lastBase = m[1]
+		if isFromLine(line) {
+			if img, ok := dockerFromImage(line); ok {
+				lastBase = img
+			}
 		}
 		if m := dockerUserRe.FindStringSubmatch(line); m != nil {
 			hasUser = true
@@ -334,23 +348,46 @@ func scanDockerfile(rel, content string) []model.Finding {
 	// FROM :latest / no tag.
 	for i, raw := range linesOf(content) {
 		line := strings.TrimSpace(raw)
-		if m := dockerLatestRe.FindStringSubmatch(line); m != nil {
-			rest := strings.TrimSpace(line[len("FROM"):])
-			if j := strings.IndexAny(rest, " \t"); j >= 0 {
-				rest = rest[:j]
-			}
-			if rest != "" && !strings.Contains(rest, "@sha256:") {
-				last := rest[strings.LastIndex(rest, "/")+1:]
-				if !strings.Contains(last, ":") || strings.HasSuffix(last, ":latest") {
-					out = append(out, finding("POSTURE-001", model.SeverityLow,
-						"Base image tanpa tag / :latest",
-						"Image dasar tidak di-pin ke digest/tag — build tidak reprodusibel.",
-						"Pin ke versi spesifik atau digest (`image:1.2.3@sha256:…`).", rel, i+1, 0.6))
-				}
-			}
+		if !isFromLine(line) {
+			continue
+		}
+		img, ok := dockerFromImage(line)
+		if !ok || strings.Contains(img, "@sha256:") {
+			continue
+		}
+		last := img[strings.LastIndex(img, "/")+1:]
+		if !strings.Contains(last, ":") || strings.HasSuffix(last, ":latest") {
+			out = append(out, finding("POSTURE-001", model.SeverityLow,
+				"Base image tanpa tag / :latest",
+				"Image dasar tidak di-pin ke digest/tag — build tidak reprodusibel.",
+				"Pin ke versi spesifik atau digest (`image:1.2.3@sha256:…`).", rel, i+1, 0.6))
 		}
 	}
 	return out
+}
+
+// isFromLine reports whether a trimmed Dockerfile line is a FROM instruction.
+func isFromLine(line string) bool {
+	return len(line) >= 4 && strings.EqualFold(line[:4], "FROM") &&
+		(len(line) == 4 || line[4] == ' ' || line[4] == '\t')
+}
+
+// dockerFromImage returns the base image reference of a FROM line, skipping
+// instruction flags such as `--platform=…` (e.g.
+// `FROM --platform=$BUILDPLATFORM golang:1.22 AS build` → `golang:1.22`).
+func dockerFromImage(line string) (string, bool) {
+	fields := strings.Fields(line)
+	for i := 1; i < len(fields); i++ {
+		f := fields[i]
+		if strings.HasPrefix(f, "--") {
+			if f == "--platform" && i+1 < len(fields) {
+				i++ // skip the flag's separate value
+			}
+			continue
+		}
+		return f, true
+	}
+	return "", false
 }
 
 func linesOf(content string) []string {

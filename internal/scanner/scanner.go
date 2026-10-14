@@ -199,9 +199,9 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 		payload, _ := json.Marshal(fileTask{ScanID: scanID, Path: e.Path, RelPath: e.RelPath, Size: e.Size})
 		msg := queue.NewMessage(TopicScanFile, payload, queue.WithPriority(filePriority(e.RelPath)))
 		if err := q.drv.Enqueue(ctx, msg); err != nil {
-			if s.tracker.complete(fmt.Sprintf("enqueue-%d", i)) {
+			s.tracker.complete(fmt.Sprintf("enqueue-%d", i), func() {
 				s.agg.commit(0, 0, 1, nil)
-			}
+			})
 			s.log.Error("dispatch failed", "file", e.RelPath, "error", err)
 		}
 	}
@@ -305,11 +305,10 @@ func (s *Scanner) handleFile(ctx context.Context, id string, t fileTask, pool wo
 
 // settle commits a file's outcome exactly once (tracker guards queue retries).
 func (s *Scanner) settle(id string, parsed, skipped, errs int, findings []model.Finding) error {
-	if !s.tracker.complete(id) {
-		return nil
-	}
-	s.agg.commit(parsed, skipped, errs, findings)
-	if s.fused != nil {
+	settled := s.tracker.complete(id, func() {
+		s.agg.commit(parsed, skipped, errs, findings)
+	})
+	if settled && s.fused != nil {
 		s.fused(Progress{Scanned: s.agg.progress(), Total: s.total})
 	}
 	return nil

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/rachmanzz/issue-detector/internal/fetcher"
 	"github.com/rachmanzz/issue-detector/internal/model"
 )
@@ -112,6 +114,70 @@ func TestCompose(t *testing.T) {
 		if got[want] == 0 {
 			t.Errorf("missing %s (got %v)", want, got)
 		}
+	}
+}
+
+func TestDockerfileFromPlatformFlag(t *testing.T) {
+	tagged := writeEntries(t, map[string]string{
+		"Dockerfile": "FROM --platform=$BUILDPLATFORM golang:1.22 AS build\nUSER app\n",
+	})
+	if got := ids(Analyze(tagged)); got["POSTURE-001"] != 0 {
+		t.Errorf("tagged image behind --platform must not raise POSTURE-001, got %v", got)
+	}
+
+	untagged := writeEntries(t, map[string]string{
+		"Dockerfile": "FROM --platform=linux/amd64 ubuntu\nUSER app\n",
+	})
+	if got := ids(Analyze(untagged)); got["POSTURE-001"] != 1 {
+		t.Errorf("untagged image behind --platform must still raise POSTURE-001, got %v", got)
+	}
+
+	nonroot := writeEntries(t, map[string]string{
+		"Dockerfile": "FROM --platform=linux/amd64 gcr.io/distroless/static:nonroot\n",
+	})
+	if got := ids(Analyze(nonroot)); got["POSTURE-002"] != 0 {
+		t.Errorf("non-root base behind --platform must not raise POSTURE-002, got %v", got)
+	}
+}
+
+func TestK8sMultiDoc(t *testing.T) {
+	entries := writeEntries(t, map[string]string{
+		"multi.yaml": `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: a
+data:
+  x: y
+---
+apiVersion: v1
+kind: Pod
+spec:
+  hostNetwork: true
+  containers:
+    - image: nginx:latest
+`,
+	})
+	got := ids(Analyze(entries))
+	if got["POSTURE-011"] == 0 || got["POSTURE-014"] == 0 {
+		t.Errorf("second YAML document must be scanned, got %v", got)
+	}
+}
+
+func TestWalkMapsAliasBounded(t *testing.T) {
+	shared := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "k"},
+		{Kind: yaml.ScalarNode, Value: "v"},
+	}}
+	root := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "a"},
+		{Kind: yaml.AliasNode, Value: "shared", Alias: shared},
+		{Kind: yaml.ScalarNode, Value: "b"},
+		{Kind: yaml.AliasNode, Value: "shared", Alias: shared},
+	}}
+	n := 0
+	walkMaps(root, func(_, _ *yaml.Node) { n++ })
+	if n != 3 { // two root pairs + the shared target visited exactly once
+		t.Fatalf("alias target must be visited once; got %d key/value calls", n)
 	}
 }
 

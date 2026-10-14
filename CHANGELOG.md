@@ -61,5 +61,15 @@ SemVer. `schema_version` laporan JSON = kontrak output (lihat `internal/version`
   cocok dengan literal raw-string milik rule sendiri.
 - `posture`: `POSTURE-002` tidak lagi dilaporkan bila base image sudah non-root
   (distroless `:nonroot` / `-unprivileged`).
+- `posture`: `FROM --platform=…` tidak lagi salah dibaca sebagai referensi image
+  (mis. `FROM --platform=$BUILDPLATFORM golang:1.22 AS build` tak lagi memicu
+  `POSTURE-001` palsu; base non-root di belakang `--platform` juga dikenali).
+- `posture`: manifest YAML multi-dokumen (`---`, umum pada Kubernetes) kini
+  seluruhnya dipindai — sebelumnya hanya dokumen pertama (`yaml.Unmarshal`).
+- `posture`: ekspansi alias/anchor YAML dibatasi (tiap target alias dikunjungi
+  sekali) untuk mencegah DoS "billion laughs" dan rekursi tak berujung.
+- `scanner`: perbaiki race yang bisa menjatuhkan temuan — commit agregasi kini
+  dilakukan **sebelum** tracker menandai selesai, sehingga `Scan()` tidak lagi
+  snapshot sebelum temuan file terakhir masuk (temuan seharusnya deterministik).
 - Self-scan repo ini (test di-skip): temuan 63 → 14, dua rule self-match dan
   false positive Dockerfile hilang.

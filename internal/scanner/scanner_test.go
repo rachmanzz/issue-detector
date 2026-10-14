@@ -199,3 +199,24 @@ func TestScanConcurrent(t *testing.T) {
 		}
 	}
 }
+
+// TestCompletionTrackerDoneAfterCommit guards the ordering that fixes a
+// dropped-finding race: the commit callback must run before done is closed,
+// otherwise Wait returns and a snapshot can miss the settling file's findings.
+func TestCompletionTrackerDoneAfterCommit(t *testing.T) {
+	tr := newCompletionTracker(1)
+	var closedInsideCommit bool
+	tr.complete("file", func() {
+		select {
+		case <-tr.done:
+			closedInsideCommit = true
+		default:
+		}
+	})
+	if closedInsideCommit {
+		t.Fatal("done must not be closed before the commit callback runs")
+	}
+	if err := tr.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+}

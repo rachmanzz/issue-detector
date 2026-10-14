@@ -27,16 +27,23 @@ func newCompletionTracker(total int) *completionTracker {
 	return t
 }
 
-// complete settles a message once. Returns true only on the first settlement,
-// so callers can commit side effects (stats, findings) exactly once.
-// Enqueue failures pass a synthetic id to drain the budget without a message.
-func (t *completionTracker) complete(id string) bool {
+// complete settles a message once. Enqueue failures pass a synthetic id to
+// drain the budget without a message. It marks id settled exactly once and
+// runs commit while still holding
+// the guard, so the caller's aggregation is visible before the tracker can
+// report done. Wait unblocks as soon as done closes, so committing after
+// signalling could let a snapshot miss the last file's findings. commit runs
+// only on the first settle of id (nil is allowed).
+func (t *completionTracker) complete(id string, commit func()) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.completed[id] {
 		return false
 	}
 	t.completed[id] = true
+	if commit != nil {
+		commit()
+	}
 	t.pending--
 	if t.pending <= 0 {
 		select {
