@@ -58,6 +58,7 @@ func newScanCmd() *cobra.Command {
 		adapterBox     string
 		noAdapters     bool
 		aiOn           bool
+		aiOff          bool
 		aiOnly         bool
 		aiProvider     string
 		aiModel        string
@@ -175,7 +176,7 @@ func newScanCmd() *cobra.Command {
 				Level: slogLevel(quiet),
 			}))
 			if cfgPath != "" {
-				logger.Info("config dimuat", "path", cfgPath, "ai_enabled", cfg.AI.Enabled)
+				logger.Info("config dimuat", "path", cfgPath, "ai_enabled", cfg.AI.Enabled && !aiOff)
 			} else {
 				logger.Info("config: default (tidak ada issue-detector.yaml/.yml/.json)")
 			}
@@ -244,6 +245,17 @@ func newScanCmd() *cobra.Command {
 				aiCfg.Only = true
 			}
 			aiOnly = aiCfg.Only
+			// --no-ai wins over --ai and any config (project/global) that enabled
+			// AI, so a single flag can force a rule-only run regardless of the
+			// layered ai.enabled setting.
+			if aiOff {
+				if aiOnly {
+					return fmt.Errorf("--no-ai tidak bisa digabung dengan --ai-only")
+				}
+				aiCfg.Enabled = false
+				aiCfg.Only = false
+				aiOnly = false
+			}
 
 			var aiProviderName string
 			var enr *ai.Enricher
@@ -484,6 +496,7 @@ func newScanCmd() *cobra.Command {
 	fl.StringVar(&adapterBox, "adapter-sandbox", "default", "sandbox adapter: none|default|strict")
 	fl.BoolVar(&noAdapters, "no-adapters", false, "lewati adapter eksternal")
 	fl.BoolVar(&aiOn, "ai", false, "aktifkan AI enrichment (Mode B); butuh API key env")
+	fl.BoolVar(&aiOff, "no-ai", false, "matikan AI (menang atas --ai dan config ai.enabled)")
 	fl.BoolVar(&aiOnly, "ai-only", false, "mode AI-detector: AI menemukan isu sendiri, rule engine dilewati (PRD §3.2)")
 	fl.StringVar(&aiProvider, "ai-provider", "", "provider AI: openai|gemini (default config/`openai`)")
 	fl.StringVar(&aiModel, "ai-model", "", "nama model AI (default per provider; WAJIB bila --ai-base-url)")
