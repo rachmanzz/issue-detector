@@ -167,10 +167,10 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// TestScanConcurrentSerialize guards roast v2: two parallel scans must both
-// complete (serialized over the process-global fiber-extras state) and stay
-// independent.
-func TestScanConcurrentSerialize(t *testing.T) {
+// TestScanConcurrent guards roast v2/v28: two scans run truly in parallel
+// (each with its own gosuite engine + queue) and stay independent — no global
+// state, no serialization. Run under -race in CI.
+func TestScanConcurrent(t *testing.T) {
 	dirA := writeFixture(t)
 	dirB := writeFixture(t)
 

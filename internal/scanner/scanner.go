@@ -9,12 +9,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rachmanzz/fiber-extras/v3/queue"
-	"github.com/rachmanzz/fiber-extras/v3/worker"
+	"github.com/rachmanzz/gosuite/v3/queue"
+	"github.com/rachmanzz/gosuite/v3/worker"
 	"github.com/rachmanzz/issue-detector/internal/clone"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/delta"
@@ -60,11 +59,10 @@ type Progress struct {
 	Total   int
 }
 
-// Scanner runs the file scan pipeline over the fiber-extras worker + queue.
+// Scanner runs the file scan pipeline over the gosuite worker + queue.
 type Scanner struct {
 	opts     Options
 	log      *slog.Logger
-	eng      *worker.Engine
 	agg      *aggregator
 	tracker  *completionTracker
 	total    int
@@ -136,9 +134,6 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// scanMu serializes scans (see Scanner.Scan comment).
-var scanMu sync.Mutex
-
 // Scan performs a full scan: fetch root → enumerate → queue per-file tasks →
 // worker-parsed analysis → aggregate. Returns a report and, unless infra fails,
 // a nil error (file-level failures are counted, not fatal).
@@ -147,13 +142,10 @@ func Scan(ctx context.Context, opts Options) (*model.ScanResult, error) {
 }
 
 func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
-	// fiber-extras queue/worker expose process-global singletons
-	// (SetDriver/RegisterHandler/StartConsumer/StopConsumer/SetGlobalDispatcher).
-	// One scan at a time per process keeps their state from cross-binding
-	// (external-audit: fiber-extras-global-misuse; roast v2).
-	scanMu.Lock()
-	defer scanMu.Unlock()
-
+	// The queue (engine/driver/router/consumer) and its handler are process-level
+	// and registered once (see getQueue/handleScanFile). A scan only dispatches
+	// and waits; the shared consumer triggers the handler, which resolves this
+	// scan from the message's scan id. No per-scan registration/binding.
 	start := time.Now()
 
 	if s.opts.Config.Timeout > 0 {
@@ -193,42 +185,20 @@ func (s *Scanner) Scan(ctx context.Context) (*model.ScanResult, error) {
 		sub = 5
 	}
 
-	eng := worker.New(
-		worker.WithMaxWorkers(jobs),
-		worker.WithSubWorkerLimit(sub),
-		worker.WithShutdownTimeout(15*time.Second),
-		worker.WithLogger(worker.NewSlogLogger(s.log)),
-	).Start()
-	defer eng.Shutdown()
-	s.eng = eng
-	// The queue consumer falls back to worker.GetDispatcher() when no dispatcher
-	// is supplied; pointing it at our engine avoids spawning a default-logged
-	// global engine (PRD-agent: quiet by default).
-	worker.SetGlobalDispatcher(eng)
+	q := getQueue(jobs, sub, s.log)
 
 	s.tracker = newCompletionTracker(len(entries))
 	s.agg = newAggregator()
 	s.total = len(entries)
-
-	queue.SetLogger(queue.NewSlogLogger(s.log))
-	queue.SetDriver(queue.NewMemoryDriver())
-	queue.RegisterHandler(TopicScanFile, s.onFileMessage)
-	if _, err := queue.StartConsumer(
-		queue.WithWorkerDispatcher(eng),
-		queue.WithBatchSize(64),
-		queue.WithPollInterval(5*time.Millisecond),
-	); err != nil {
-		return nil, fmt.Errorf("start queue consumer: %w", err)
-	}
-	defer queue.StopConsumer()
+	scanStates.Store(scanID, s)
+	defer scanStates.Delete(scanID)
 
 	s.log.Info("scan started", "scan_id", scanID, "files", len(entries), "root", root, "jobs", jobs)
 
 	for i, e := range entries {
-		payload, _ := json.Marshal(fileTask{Path: e.Path, RelPath: e.RelPath, Size: e.Size})
-		if err := queue.Dispatch(ctx, TopicScanFile, payload,
-			queue.WithPriority(filePriority(e.RelPath)),
-		); err != nil {
+		payload, _ := json.Marshal(fileTask{ScanID: scanID, Path: e.Path, RelPath: e.RelPath, Size: e.Size})
+		msg := queue.NewMessage(TopicScanFile, payload, queue.WithPriority(filePriority(e.RelPath)))
+		if err := q.drv.Enqueue(ctx, msg); err != nil {
 			if s.tracker.complete(fmt.Sprintf("enqueue-%d", i)) {
 				s.agg.commit(0, 0, 1, nil)
 			}
@@ -312,27 +282,25 @@ type ruleResult struct {
 	matches []model.Match
 }
 
-func (s *Scanner) onFileMessage(ctx context.Context, msg *queue.Message, pool worker.SubWorkerPool) error {
-	var t fileTask
-	if err := json.Unmarshal(msg.Payload, &t); err != nil {
-		return s.settle(msg.ID, 0, 0, 1, nil)
-	}
-
+// handleFile processes one dispatched file for this scan. It is invoked by the
+// shared queue handler (handleScanFile), which has already resolved s from the
+// message's scan id.
+func (s *Scanner) handleFile(ctx context.Context, id string, t fileTask, pool worker.SubWorkerPool) error {
 	f, err := parser.ReadFile(t.Path, t.RelPath, t.Size, s.opts.Config.MaxFileSize)
 	if err != nil {
 		s.log.Error("read file failed", "file", t.RelPath, "error", err)
-		return s.settle(msg.ID, 0, 0, 1, nil)
+		return s.settle(id, 0, 0, 1, nil)
 	}
 
 	if f.Skipped || f.Binary {
-		return s.settle(msg.ID, 0, 1, 0, nil)
+		return s.settle(id, 0, 1, 0, nil)
 	}
 
 	findings, err := s.analyze(ctx, pool, f)
 	if err != nil {
 		return err // transient: the consumer retries; nothing is committed yet
 	}
-	return s.settle(msg.ID, 1, 0, 0, findings)
+	return s.settle(id, 1, 0, 0, findings)
 }
 
 // settle commits a file's outcome exactly once (tracker guards queue retries).

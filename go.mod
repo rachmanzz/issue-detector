@@ -6,8 +6,8 @@ require (
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/gofiber/fiber/v3 v3.6.0
 	github.com/google/uuid v1.6.0
-	github.com/rachmanzz/fiber-extras/v3/queue v0.2.0
-	github.com/rachmanzz/fiber-extras/v3/worker v0.2.0
+	github.com/rachmanzz/gosuite/v3/queue v0.2.2
+	github.com/rachmanzz/gosuite/v3/worker v0.2.2
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3
 	github.com/spf13/cobra v1.10.2
