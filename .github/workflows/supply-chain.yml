@@ -1,0 +1,32 @@
+name: supply-chain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sha-pinned:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Ensure every GitHub Action is pinned to a full commit SHA
+        run: |
+          fail=0
+          pat='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[^[:space:]#]+'
+          while IFS= read -r spec; do
+            [ -z "$spec" ] && continue
+            sha="${spec##*@}"
+            if [ "$sha" = "$spec" ] || ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "::error::action not pinned to a commit SHA: $spec"
+              fail=1
+            fi
+          done < <(grep -rhoE "$pat" .github/workflows | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*//')
+          if [ "$fail" -ne 0 ]; then
+            echo "Pin actions like: actions/checkout@<40-hex-sha> # vX.Y.Z"; exit 1
+          fi
+          echo "all actions are SHA-pinned"
