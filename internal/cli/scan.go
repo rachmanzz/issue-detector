@@ -12,6 +12,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/adapter"
 	"github.com/rachmanzz/issue-detector/internal/ai"
 	"github.com/rachmanzz/issue-detector/internal/baseline"
+	"github.com/rachmanzz/issue-detector/internal/cache"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/delta"
 	"github.com/rachmanzz/issue-detector/internal/deps"
@@ -24,6 +25,7 @@ import (
 	"github.com/rachmanzz/issue-detector/internal/scanner"
 	"github.com/rachmanzz/issue-detector/internal/score"
 	"github.com/rachmanzz/issue-detector/internal/sign"
+	"github.com/rachmanzz/issue-detector/internal/version"
 	"github.com/rachmanzz/issue-detector/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -66,6 +68,7 @@ func newScanCmd() *cobra.Command {
 		requireSig  bool
 		keyringPath string
 		historyPath string
+		noCache     bool
 		webOn       bool
 		webPort     int
 	)
@@ -95,7 +98,9 @@ func newScanCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("config: %w", err)
 			}
-			cfg = loaded
+			// Cache settings default to the per-user global config so they stay
+			// out of the scanned project.
+			cfg = config.ApplyGlobalCache(loaded)
 
 			// Flag menimpa YAML hanya bila eksplisit di-set (agar config dipakai).
 			if remote != "" {
@@ -322,6 +327,29 @@ func newScanCmd() *cobra.Command {
 				}
 			}
 
+			// Session/change cache (PRD §10): record commits + uncommitted file
+			// hashes for this project so later scans can detect changes. Skipped
+			// for remote clones (their root is a transient temp dir) and when
+			// --no-cache is set.
+			if cfg.Remote == "" && !noCache && cacheEnabled(cfg.Cache) {
+				opts := cache.Options{
+					Mode:        cfg.Cache.Mode,
+					Path:        cfg.Cache.Path,
+					MaxItems:    cfg.Cache.MaxItems,
+					RuleSetHash: scanner.RulesetFingerprint(cfg),
+				}
+				if store, cerr := cache.Open(opts); cerr != nil {
+					logger.Warn("cache: gagal membuka", "err", cerr)
+				} else if cres, rerr := store.Register(root, version.Version); rerr != nil {
+					logger.Warn("cache: gagal register", "err", rerr, "dir", store.Dir())
+				} else if cres.Skipped {
+					logger.Info("cache: tidak ada perubahan", "dir", store.Dir())
+				} else {
+					logger.Info("cache: sesi terdaftar", "dir", store.Dir(),
+						"commit_baru", len(cres.NewCommits), "file_berubah", len(cres.Changed))
+				}
+			}
+
 			// Optional history snapshot for watch/trend (PRD §11 M7).
 			if historyPath != "" {
 				if err := recordHistory(historyPath, res); err != nil {
@@ -427,16 +455,22 @@ func newScanCmd() *cobra.Command {
 	fl.StringVar(&aiBaseURL, "ai-base-url", "", "override base URL provider AI (server OpenAI-compatible apa pun)")
 	fl.IntVar(&aiMax, "ai-max-findings", 0, "maksimum temuan di-enrich (default config/25)")
 	fl.IntVar(&aiBudget, "ai-budget-tokens", 0, "budget token AI (default config/100000)")
-	fl.StringVar(&aiCacheDir, "ai-cache-dir", "", "direktori cache AI (default config/.issue-detector-cache)")
+	fl.StringVar(&aiCacheDir, "ai-cache-dir", "", "direktori cache AI (default ~/.issues_detector/ai-cache)")
 	fl.StringArrayVar(&pluginPaths, "plugin", nil, "file/direktori plugin WASM (.wasm; bisa diulang)")
 	fl.StringArrayVar(&packPaths, "pack", nil, "rule pack (direktori atau .tar.gz; bisa diulang)")
 	fl.BoolVar(&requireSig, "require-signature", false, "wajibkan tanda tangan valid untuk pack")
 	fl.StringVar(&keyringPath, "pack-keyring", "", "keyring ed25519 (baris base64 public key)")
 	fl.StringVar(&historyPath, "history", "", "simpan snapshot ke database history SQLite (PRD §11 M7)")
+	fl.BoolVar(&noCache, "no-cache", false, "jangan tulis cache sesi (untuk CI paranoid)")
 	fl.BoolVar(&webOn, "web", false, "jalankan Mode Web interaktif setelah scan (PRD §3.6)")
 	fl.IntVar(&webPort, "web-port", 8088, "port Mode Web")
 
 	return cmd
+}
+
+// cacheEnabled reports whether the session cache is active (nil = enabled).
+func cacheEnabled(c config.CacheConfig) bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 // mergeFindings appends extra findings (e.g. CVE) and re-derives the summary.

@@ -5,12 +5,26 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/rachmanzz/issue-detector/internal/model"
 )
+
+func TestDefaultCacheDirGlobal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ISSUE_DETECTOR_HOME", home)
+	e, err := New(Config{Provider: "openai", Model: "m", APIKey: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".issues_detector", "ai-cache")
+	if e.cfg.CacheDir != want {
+		t.Errorf("CacheDir = %q, want %q", e.cfg.CacheDir, want)
+	}
+}
 
 func TestRedact(t *testing.T) {
 	in := `password := "hunter2secret" key: AKIAIOSFODNN7EXAMPLE`

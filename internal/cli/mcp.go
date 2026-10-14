@@ -23,6 +23,7 @@ func newMCPCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := config.Default()
 			cfg.NoGit = noGit
+			cfg = config.ApplyGlobalCache(cfg)
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			srv := &mcp.Server{
 				Root: root, Config: cfg, BaselinePath: baseline, HistoryPath: history,

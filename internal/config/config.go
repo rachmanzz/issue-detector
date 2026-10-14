@@ -4,6 +4,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -32,6 +33,26 @@ type Config struct {
 	RulesDir     string        `yaml:"rules_dir"`     // default rule dir (default .issue-detector/rules)
 	ScoreWeights score.Weights `yaml:"score_weights"` // priority score coefficients (roast v9)
 	AI           AIConfig      `yaml:"ai"`            // AI enrichment (Mode B, PRD §6.3)
+	Cache        CacheConfig   `yaml:"cache"`         // session/change cache (PRD §10)
+}
+
+// CacheConfig controls where the session/change cache (main change path) lives.
+//
+// Everything defaults to the per-user dir so nothing is written into the
+// scanned project. Mode selects the location:
+//   - auto   (default): per-user global dir (~/.issues_detector/cache).
+//   - global : per-user global dir (~/.issues_detector/cache).
+//   - local  : next to the executable (opt-in; pollutes the install dir).
+//
+// Path is a custom main change path that overrides Mode when set.
+// Enabled defaults to true (nil = enabled). MaxItems caps how many change items
+// are retained per session (LRU trim; 0 = default 50) so long-lived agent
+// sessions don't grow unbounded (PRD §10 risk table).
+type CacheConfig struct {
+	Enabled  *bool  `yaml:"enabled"`
+	Mode     string `yaml:"mode"`
+	Path     string `yaml:"path"`
+	MaxItems int    `yaml:"max_items"`
 }
 
 // AIConfig mirrors the `ai:` YAML block (Mode B enrichment).
@@ -146,4 +167,69 @@ func Load(path string, failIfMissing bool) (Config, error) {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// GlobalDir returns the per-user directory for config/cache (~/.issues_detector).
+// ISSUE_DETECTOR_HOME overrides the home base (tests/CI).
+func GlobalDir() (string, error) {
+	home := os.Getenv("ISSUE_DETECTOR_HOME")
+	if home == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		home = h
+	}
+	return filepath.Join(home, ".issues_detector"), nil
+}
+
+// GlobalConfigPath returns the per-user config path so cache settings stay out
+// of the scanned project (roast: cache config must not live in the target repo).
+func GlobalConfigPath() (string, error) {
+	return GlobalPath("issue-detector.yaml")
+}
+
+// GlobalPath joins elem under the per-user dir (~/.issues_detector). All
+// tool-managed state (config, session cache, AI cache, history) lives here so
+// nothing is written into the scanned project. ISSUE_DETECTOR_HOME overrides
+// the home base (tests/CI).
+func GlobalPath(elem ...string) (string, error) {
+	d, err := GlobalDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(append([]string{d}, elem...)...), nil
+}
+
+// MergeCache overlays cache settings: non-nil/non-empty overlay fields win.
+func MergeCache(base, overlay CacheConfig) CacheConfig {
+	if overlay.Enabled != nil {
+		base.Enabled = overlay.Enabled
+	}
+	if overlay.Mode != "" {
+		base.Mode = overlay.Mode
+	}
+	if overlay.Path != "" {
+		base.Path = overlay.Path
+	}
+	if overlay.MaxItems > 0 {
+		base.MaxItems = overlay.MaxItems
+	}
+	return base
+}
+
+// ApplyGlobalCache overlays the cache block from the per-user config
+// (~/.issues_detector/issue-detector.yaml) onto cfg. Settings already present
+// in cfg (project config) take precedence. Missing global file is a no-op.
+func ApplyGlobalCache(cfg Config) Config {
+	path, err := GlobalConfigPath()
+	if err != nil {
+		return cfg
+	}
+	g, err := Load(path, false)
+	if err != nil {
+		return cfg
+	}
+	cfg.Cache = MergeCache(g.Cache, cfg.Cache)
+	return cfg
 }

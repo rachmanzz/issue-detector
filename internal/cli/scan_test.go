@@ -12,6 +12,10 @@ import (
 // TestScanHonorsYAMLConfig guards the regression where YAML keys
 // (severity_min/no_git/…) were clobbered by flag defaults.
 func TestScanHonorsYAMLConfig(t *testing.T) {
+	// Keep the session cache out of the developer's real home dir.
+	t.Setenv("ISSUE_DETECTOR_HOME", t.TempDir())
+	t.Setenv("ISSUE_DETECTOR_CACHE_DIR", t.TempDir())
+
 	dir := t.TempDir()
 	must := func(name, content string) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {

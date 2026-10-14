@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/model"
 	"github.com/rachmanzz/issue-detector/internal/score"
 )
@@ -51,7 +52,13 @@ func New(cfg Config) (*Enricher, error) {
 		cfg.BudgetTokens = 100000
 	}
 	if cfg.CacheDir == "" {
-		cfg.CacheDir = ".issue-detector-cache"
+		// Default to the per-user dir so nothing is written into the scanned
+		// project. Falls back to a local name if the home dir is unavailable.
+		if p, err := config.GlobalPath("ai-cache"); err == nil {
+			cfg.CacheDir = p
+		} else {
+			cfg.CacheDir = ".issue-detector-cache"
+		}
 	}
 	if cfg.Model == "" {
 		if cfg.BaseURL != "" {

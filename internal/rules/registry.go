@@ -5,6 +5,9 @@ package rules
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 
 	"github.com/rachmanzz/issue-detector/internal/model"
 )
@@ -70,6 +73,17 @@ func (r *Registry) All() []*Rule {
 	out := make([]*Rule, len(r.rules))
 	copy(out, r.rules)
 	return out
+}
+
+// Fingerprint returns a stable hash of the rule set (IDs + metadata) so callers
+// (e.g. the session cache) can key results on the rule set version and detect
+// "same files, different rules" (PRD §10; roast v20).
+func (r *Registry) Fingerprint() string {
+	h := sha256.New()
+	for _, rule := range r.rules {
+		fmt.Fprintf(h, "%s|%s|%s|%v\n", rule.ID, rule.Category, rule.Severity, rule.Languages)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 // RuleForLanguage reports whether a rule applies to the given file language.

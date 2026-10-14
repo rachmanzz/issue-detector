@@ -14,8 +14,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// DefaultHistoryFile is where watch/trend store their SQLite history.
-const DefaultHistoryFile = ".issue-detector-history.db"
+// defaultHistoryFile is where watch/trend store their SQLite history. It lives
+// in the per-user dir (~/.issues_detector/history.db) so nothing is written into
+// the scanned project.
+func defaultHistoryFile() string {
+	if p, err := config.GlobalPath("history.db"); err == nil {
+		return p
+	}
+	return ".issue-detector-history.db"
+}
 
 func newWatchCmd() *cobra.Command {
 	var (
@@ -66,7 +73,7 @@ func newWatchCmd() *cobra.Command {
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVar(&historyPath, "history", DefaultHistoryFile, "path database history (SQLite)")
+	fl.StringVar(&historyPath, "history", defaultHistoryFile(), "path database history (SQLite)")
 	fl.DurationVar(&interval, "interval", 30*time.Second, "jeda antar rescan")
 	fl.BoolVar(&once, "once", false, "scan sekali lalu keluar")
 	fl.BoolVar(&noGit, "no-git", false, "lewati analisis kesehatan git")
@@ -101,7 +108,7 @@ func newTrendCmd() *cobra.Command {
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVar(&historyPath, "history", DefaultHistoryFile, "path database history (SQLite)")
+	fl.StringVar(&historyPath, "history", defaultHistoryFile(), "path database history (SQLite)")
 	fl.IntVar(&limit, "limit", 30, "jumlah snapshot terbaru")
 	fl.StringVarP(&format, "format", "f", "text", "format: text|json")
 	return cmd

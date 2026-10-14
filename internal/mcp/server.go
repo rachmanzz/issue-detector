@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/rachmanzz/issue-detector/internal/baseline"
+	"github.com/rachmanzz/issue-detector/internal/cache"
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/rachmanzz/issue-detector/internal/deps"
 	"github.com/rachmanzz/issue-detector/internal/history"
@@ -212,6 +213,19 @@ func (s *Server) toolScan(ctx context.Context, args map[string]any) (any, error)
 	if bp, ok := args["baseline"].(string); ok && bp != "" {
 		if set, berr := baseline.Load(bp); berr == nil {
 			set.Filter(res)
+		}
+	}
+	// Session/change cache (PRD §10): record this project's commits + uncommitted
+	// file hashes. Best-effort; never fails the scan.
+	if cfg.Cache.Enabled == nil || *cfg.Cache.Enabled {
+		opts := cache.Options{
+			Mode:        cfg.Cache.Mode,
+			Path:        cfg.Cache.Path,
+			MaxItems:    cfg.Cache.MaxItems,
+			RuleSetHash: scanner.RulesetFingerprint(cfg),
+		}
+		if store, cerr := cache.Open(opts); cerr == nil {
+			_, _ = store.Register(root, s.Version)
 		}
 	}
 	s.mu.Lock()

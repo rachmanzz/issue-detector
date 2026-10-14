@@ -106,3 +106,68 @@ func TestMergeLayer(t *testing.T) {
 		t.Errorf("fail_on should be overridden when set: %q", out2.FailOn)
 	}
 }
+
+func TestMergeCache(t *testing.T) {
+	off := false
+	base := CacheConfig{Mode: "global"}
+	over := CacheConfig{Enabled: &off, Path: "/custom"}
+	out := MergeCache(base, over)
+	if out.Mode != "global" {
+		t.Errorf("mode should stay from base: %q", out.Mode)
+	}
+	if out.Enabled == nil || *out.Enabled {
+		t.Errorf("enabled should be overridden to false: %+v", out.Enabled)
+	}
+	if out.Path != "/custom" {
+		t.Errorf("path should be overridden: %q", out.Path)
+	}
+
+	// Empty overlay leaves base untouched.
+	if got := MergeCache(base, CacheConfig{}); got != base {
+		t.Errorf("empty overlay changed base: %+v", got)
+	}
+}
+
+func TestLoadCacheBlock(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "issue-detector.yaml")
+	if err := os.WriteFile(p, []byte("cache:\n  enabled: true\n  mode: local\n  path: .cache-x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cache.Enabled == nil || !*cfg.Cache.Enabled || cfg.Cache.Mode != "local" || cfg.Cache.Path != ".cache-x" {
+		t.Errorf("cache block mismatch: %+v", cfg.Cache)
+	}
+}
+
+func TestApplyGlobalCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ISSUE_DETECTOR_HOME", home)
+	dir := filepath.Join(home, ".issues_detector")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gp := filepath.Join(dir, "issue-detector.yaml")
+	if err := os.WriteFile(gp, []byte("cache:\n  mode: global\n  path: /global-cache\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := ApplyGlobalCache(Default())
+	if cfg.Cache.Mode != "global" || cfg.Cache.Path != "/global-cache" {
+		t.Errorf("global cache not applied: %+v", cfg.Cache)
+	}
+
+	// Project-level cache settings take precedence over global.
+	project := Default()
+	project.Cache.Mode = "local"
+	cfg = ApplyGlobalCache(project)
+	if cfg.Cache.Mode != "local" {
+		t.Errorf("project cache should win: %q", cfg.Cache.Mode)
+	}
+	if cfg.Cache.Path != "/global-cache" {
+		t.Errorf("unspecified project field should inherit global: %q", cfg.Cache.Path)
+	}
+}

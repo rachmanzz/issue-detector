@@ -3,10 +3,43 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/rachmanzz/issue-detector/internal/config"
 	"github.com/spf13/cobra"
 )
+
+// writeGlobalCacheMode sets cache.mode in the per-user config while preserving
+// any other keys. Used by `--install-temporary`.
+func writeGlobalCacheMode(mode string) error {
+	path, err := config.GlobalConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	m := map[string]any{}
+	if b, rerr := os.ReadFile(path); rerr == nil && len(strings.TrimSpace(string(b))) > 0 {
+		if err := yaml.Unmarshal(b, &m); err != nil {
+			return fmt.Errorf("config global rusak: %w", err)
+		}
+	}
+	cm, _ := m["cache"].(map[string]any)
+	if cm == nil {
+		cm = map[string]any{}
+	}
+	cm["mode"] = mode
+	m["cache"] = cm
+	out, err := yaml.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o644)
+}
 
 // notYet returns a friendly error for commands reserved for later milestones.
 func notYet(milestone, desc string) error {
@@ -52,7 +85,14 @@ ai:
   api_key_env: ""       # nama env var key (default OPENAI_API_KEY/GEMINI_API_KEY)
   max_findings: 25
   budget_tokens: 100000
-  cache_dir: .issue-detector-cache
+  # cache_dir: (default: ~/.issues_detector/ai-cache)
+
+# Session/change cache (PRD §10) — semua state tool ada di ~/.issues_detector
+cache:
+  enabled: true
+  mode: global            # auto|global = ~/.issues_detector/cache; local = di samping executable
+  # path: ""              # path kustom (menimpa mode)
+  max_items: 50           # retensi LRU per sesi (0 = default 50)
 `
 	if err := os.WriteFile(config.FileName, []byte(content), 0o644); err != nil {
 		return err

@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/rachmanzz/issue-detector/internal/config"
+	"github.com/rachmanzz/issue-detector/internal/report"
 	"github.com/rachmanzz/issue-detector/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -38,12 +40,34 @@ func Execute() error {
 
 // NewRootCmd builds the full command tree.
 func NewRootCmd() *cobra.Command {
+	var installTemporary bool
+
 	root := &cobra.Command{
 		Use:           "issue-detector",
 		Short:         "Deteksi issue source code: security, quality, bugs, git health (PRD-driven)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// RunE makes the bare root (e.g. `issue-detector --install-temporary`)
+		// execute the persistent hook below; otherwise show help.
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+			if !installTemporary {
+				return nil
+			}
+			if err := writeGlobalCacheMode("global"); err != nil {
+				return err
+			}
+			if p, err := config.GlobalConfigPath(); err == nil {
+				fmt.Printf("cache mode=global diregister di %s\n", p)
+			}
+			return exit(report.ExitOK)
+		},
 	}
+
+	root.PersistentFlags().BoolVar(&installTemporary, "install-temporary", false,
+		"register mode cache global di ~/.issues_detector/issue-detector.yaml lalu keluar")
 
 	root.AddCommand(
 		newScanCmd(),

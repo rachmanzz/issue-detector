@@ -108,6 +108,19 @@ func loadExternalRules(reg *rules.Registry, cfg config.Config) error {
 	return nil
 }
 
+// RulesetFingerprint returns a stable hash of the rule set the scanner would use
+// for cfg (builtins + external rules from rules/rules_dir). It is used as part
+// of the session-cache key so results are invalidated when rules change
+// (PRD §10; roast v20).
+func RulesetFingerprint(cfg config.Config) string {
+	reg := rules.NewRegistry()
+	if err := loadExternalRules(reg, cfg); err != nil {
+		// On error the scan itself would warn; fingerprint builtins only.
+		reg = rules.NewRegistry()
+	}
+	return reg.Fingerprint()
+}
+
 type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
