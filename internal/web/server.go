@@ -204,6 +204,11 @@ func (s *Server) handleScan(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 	res.Findings = filterFindings(res.Findings, c)
+	status := res.Status
+	if status == "" {
+		status = model.StatusComplete
+	}
+	c.Set("X-Scan-Status", status)
 	return c.JSON(res)
 }
 

@@ -31,48 +31,49 @@ import (
 
 func newScanCmd() *cobra.Command {
 	var (
-		format      string
-		output      string
-		categories  string
-		severityMin string
-		failOn      string
-		aiGate      bool
-		cfgPath     string
-		remote      string
-		jobs        int
-		subWorker   int
-		maxFileSize int64
-		timeoutSecs int
-		quiet       bool
-		ignore      []string
-		baseRef     string
-		diffFile    string
-		noGit       bool
-		rulesPath   []string
-		baselineF   string
-		noDeps      bool
-		sbomOut     string
-		osvEndpoint string
-		adapters    []string
-		adapterBox  string
-		noAdapters  bool
-		aiOn        bool
-		aiOnly      bool
-		aiProvider  string
-		aiModel     string
-		aiBaseURL   string
-		aiMax       int
-		aiBudget    int
-		aiCacheDir  string
-		pluginPaths []string
-		packPaths   []string
-		requireSig  bool
-		keyringPath string
-		historyPath string
-		noCache     bool
-		force       bool
-		webOn       bool
-		webPort     int
+		format         string
+		output         string
+		categories     string
+		severityMin    string
+		failOn         string
+		aiGate         bool
+		failIncomplete bool
+		cfgPath        string
+		remote         string
+		jobs           int
+		subWorker      int
+		maxFileSize    int64
+		timeoutSecs    int
+		quiet          bool
+		ignore         []string
+		baseRef        string
+		diffFile       string
+		noGit          bool
+		rulesPath      []string
+		baselineF      string
+		noDeps         bool
+		sbomOut        string
+		osvEndpoint    string
+		adapters       []string
+		adapterBox     string
+		noAdapters     bool
+		aiOn           bool
+		aiOnly         bool
+		aiProvider     string
+		aiModel        string
+		aiBaseURL      string
+		aiMax          int
+		aiBudget       int
+		aiCacheDir     string
+		pluginPaths    []string
+		packPaths      []string
+		requireSig     bool
+		keyringPath    string
+		historyPath    string
+		noCache        bool
+		force          bool
+		webOn          bool
+		webPort        int
 	)
 
 	cmd := &cobra.Command{
@@ -358,6 +359,9 @@ func newScanCmd() *cobra.Command {
 				n, eerr := enr.Enrich(cmd.Context(), res)
 				if eerr != nil {
 					logger.Error("AI enrichment gagal (endpoint/key?)", "err", eerr, "enriched", n)
+					// Detection itself was complete; record the degradation but
+					// do not mark the scan partial.
+					res.ScanErrors = append(res.ScanErrors, "ai enrichment: "+eerr.Error())
 				} else if n > 0 {
 					logger.Info("AI enrichment selesai", "enriched", n)
 				} else {
@@ -437,6 +441,12 @@ func newScanCmd() *cobra.Command {
 				return srv.Listen("127.0.0.1", webPort)
 			}
 
+			if res.Partial() {
+				logger.Warn("scan parsial: sebagian file tidak berhasil diperiksa", "status", res.Status)
+				if failIncomplete {
+					return exit(report.ExitScanError)
+				}
+			}
 			if code := report.ExitFor(res, gate, aiGate); code != report.ExitOK {
 				return exit(code)
 			}
@@ -451,6 +461,7 @@ func newScanCmd() *cobra.Command {
 	fl.StringVar(&severityMin, "severity-min", "", "severity minimum dilaporkan: low|medium|high|critical")
 	fl.StringVar(&failOn, "fail-on", "", "gate exit code: none|low|medium|high|critical")
 	fl.BoolVar(&aiGate, "ai-gate", false, "ikutkan temuan AI (source=ai) ke gate --fail-on (default: advisory)")
+	fl.BoolVar(&failIncomplete, "fail-on-incomplete", false, "exit code error bila scan parsial (sebagian file tak terperiksa)")
 	fl.StringVar(&cfgPath, "config", "", "path config YAML/JSON (default <root>/issue-detector.yaml|.yml|.json)")
 	fl.StringVar(&remote, "remote", "", "clone git URL terlebih dahulu, scan di cache dir (root dipakai sebagai cache dir)")
 	fl.IntVar(&jobs, "jobs", 0, "jumlah worker (default NumCPU)")

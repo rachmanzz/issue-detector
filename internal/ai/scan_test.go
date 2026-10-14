@@ -244,6 +244,43 @@ func TestScaleFindingsExcerptMapping(t *testing.T) {
 	}
 }
 
+// TestSummarizeFailureIsNotFatal guards that a failing narrative summary does
+// not make the detector report an error (which would mark the scan partial and
+// block the session ledger) — detection chunks succeeded.
+func TestSummarizeFailureIsNotFatal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		prompt := ""
+		if len(req.Messages) > 0 {
+			prompt = req.Messages[len(req.Messages)-1].Content
+		}
+		if strings.Contains(prompt, "Ringkas") {
+			w.WriteHeader(http.StatusInternalServerError) // summary endpoint fails
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{
+				"content": `{"findings":[{"line":1,"severity":"high","category":"bug","title":"t","message":"m","confidence":0.9}]}`,
+			}}},
+		})
+	}))
+	defer srv.Close()
+	e, _ := New(Config{Provider: "openai", Model: "m", BaseURL: srv.URL, APIKey: "k", CacheDir: t.TempDir()})
+
+	findings, _, err := e.Detect(context.Background(), []model.AIFile{{RelPath: "a.go", Content: "a\nb"}})
+	if err != nil {
+		t.Fatalf("a summary failure must not error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("detection findings must be kept, got %d", len(findings))
+	}
+}
+
 func TestChunkContent(t *testing.T) {
 	if got := chunkContent(""); got != nil {
 		t.Errorf("empty content should yield no chunks, got %d", len(got))

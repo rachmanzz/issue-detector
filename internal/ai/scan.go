@@ -110,12 +110,10 @@ func (e *Enricher) Detect(ctx context.Context, files []model.AIFile) ([]model.Fi
 	}
 
 	findings = dedupFindings(findings)
-	summary, err := e.summarize(ctx, files, findings)
-	if err != nil && lastErr == nil {
-		lastErr = err
-	}
-	// Persist the detector cache once per run instead of per chunk (avoids
-	// rewriting the whole JSON file for every file/chunk).
+	// The narrative summary is best-effort: a summarize failure must NOT make
+	// the scan look partial (that would block the session ledger forever even
+	// though every detection chunk succeeded). Only detection errors propagate.
+	summary, _ := e.summarize(ctx, files, findings)
 	e.dcache.save()
 	return findings, summary, lastErr
 }

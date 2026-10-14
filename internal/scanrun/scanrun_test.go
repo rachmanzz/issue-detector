@@ -127,7 +127,7 @@ func TestIncompleteScanNotRegistered(t *testing.T) {
 	opts := baseOpts(root)
 	opts.AIOnly = true
 	p := Prepare(ctx, opts)
-	p.Result(&model.ScanResult{ScanID: "partial", Incomplete: true})
+	p.Result(&model.ScanResult{ScanID: "partial", Status: model.StatusPartial})
 
 	if _, has, _ := p.Store().LastItem(root); has {
 		t.Errorf("incomplete scan must not advance the ledger")

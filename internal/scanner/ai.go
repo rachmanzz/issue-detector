@@ -73,11 +73,10 @@ func (s *Scanner) scanAI(ctx context.Context, root string, entries []fetcher.Ent
 	s.log.Info("ai-only scan", "files", len(files), "changed", len(changed), "max_files", maxFiles)
 	findings, summary, err := s.opts.Detector.Detect(ctx, files)
 	if err != nil {
-		// A failed chunk means the file set was not fully reviewed; flag the
-		// result so the session ledger is not advanced (the next run retries).
+		// A failed chunk means the file set was not fully reviewed; mark the
+		// result partial so the ledger is not advanced (the next run retries).
 		s.log.Warn("ai detector error", "err", err)
 	}
-	incomplete := err != nil
 	// Cosmetic findings (the "info" floor — typos/style/nits) are dropped so the
 	// AI-only report stays assertive and doesn't surface noise (PRD §3.2).
 	findings = dropCosmetic(findings)
@@ -106,7 +105,7 @@ func (s *Scanner) scanAI(ctx context.Context, root string, entries []fetcher.Ent
 		sum.BySeverity[f.Severity]++
 	}
 
-	return &model.ScanResult{
+	res := &model.ScanResult{
 		SchemaVersion: version.SchemaVersion,
 		Tool:          model.ToolInfo{Name: version.ToolName, Version: version.Version},
 		ScanID:        scanID,
@@ -115,8 +114,12 @@ func (s *Scanner) scanAI(ctx context.Context, root string, entries []fetcher.Ent
 		Summary:       sum,
 		Findings:      findings,
 		AISummary:     summary,
-		Incomplete:    incomplete,
-	}, nil
+	}
+	if err != nil {
+		res.Status = model.StatusPartial
+		res.ScanErrors = append(res.ScanErrors, err.Error())
+	}
+	return res, nil
 }
 
 // dropCosmetic removes AI findings at the cosmetic floor (severity "info"), so

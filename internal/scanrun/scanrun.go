@@ -127,12 +127,12 @@ func (p *Prepared) Result(res *model.ScanResult) {
 	if p.explicit {
 		return
 	}
-	// Never advance the ledger for an incomplete scan (e.g. the AI detector
-	// failed on some chunks): marking those files "checked" would make later
-	// runs skip them, silently losing findings. Retry next run instead; chunks
-	// that already succeeded stay in the detector cache, so retries are cheap.
-	if res != nil && res.Incomplete {
-		p.opts.Log.Warn("cache: ledger tidak di-advance (scan tidak lengkap)")
+	// Never advance the ledger for a partial scan (e.g. the AI detector failed
+	// on some chunks): marking those files "checked" would make later runs skip
+	// them, silently losing findings. Retry next run instead; chunks that
+	// already succeeded stay in the detector cache, so retries are cheap.
+	if res.Partial() {
+		p.opts.Log.Warn("cache: ledger tidak di-advance (scan parsial)")
 		return
 	}
 	if cres, err := p.store.Register(p.opts.Root, p.opts.Version); err != nil {

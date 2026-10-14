@@ -134,8 +134,11 @@ func TestScanAIOnlyIncompleteOnDetectorError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Incomplete {
-		t.Errorf("detector error must set Incomplete=true")
+	if res.Status != model.StatusPartial {
+		t.Errorf("detector error must set Status=partial, got %q", res.Status)
+	}
+	if len(res.ScanErrors) == 0 {
+		t.Errorf("detector error must be recorded in ScanErrors")
 	}
 }
 

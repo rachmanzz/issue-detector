@@ -210,13 +210,23 @@ type ScanResult struct {
 	// AISummary is the optional narrative produced by AI-detector mode
 	// (--ai-only, PRD §3.2). Empty for deterministic-only scans.
 	AISummary string `json:"ai_summary,omitempty"`
-	// Incomplete marks a result that must not be recorded as a fully-checked
-	// scan (e.g. the AI detector failed on one or more chunks). The CLI still
-	// reports the partial result, but the session ledger is not advanced so the
-	// next run retries instead of silently skipping unchanged files. Not part of
-	// the wire schema.
-	Incomplete bool `json:"-"`
+	// Status is "partial" when at least one detection chunk failed, meaning the
+	// file set was not fully reviewed; it is empty/"complete" otherwise. It is
+	// wire-visible so CI/UI/agents can tell a partial scan from a clean one.
+	Status string `json:"status,omitempty"`
+	// ScanErrors lists non-fatal problems (e.g. AI enrichment/summary failures)
+	// that did not change the detection result but are worth surfacing.
+	ScanErrors []string `json:"scan_errors,omitempty"`
 }
+
+// Scan status values (ScanResult.Status).
+const (
+	StatusComplete = "complete"
+	StatusPartial  = "partial"
+)
+
+// Partial reports whether the scan did not fully review the file set.
+func (r *ScanResult) Partial() bool { return r != nil && r.Status == StatusPartial }
 
 // LineRange is an inclusive 1-based line range (used for partial AI payloads).
 type LineRange struct {
