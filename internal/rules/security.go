@@ -22,7 +22,7 @@ var securityRules = []*Rule{
 			Confidence: 0.65,
 		},
 		Matcher: matchFunc(func(f *model.File) []model.Match {
-			return matchRegexes(f, injRes, 3)
+			return matchCodeRegexes(f, injRes, 3)
 		}),
 	},
 	{
@@ -37,7 +37,7 @@ var securityRules = []*Rule{
 			Confidence: 0.8,
 		},
 		Matcher: matchFunc(func(f *model.File) []model.Match {
-			return matchRegexes(f, permRes, 2)
+			return matchCodeRegexes(f, permRes, 2)
 		}),
 	},
 	{
@@ -52,7 +52,7 @@ var securityRules = []*Rule{
 			Confidence: 0.6,
 		},
 		Matcher: matchFunc(func(f *model.File) []model.Match {
-			return matchRegexes(f, cryptoRes, 3)
+			return matchCodeRegexes(f, cryptoRes, 3)
 		}),
 	},
 	{
@@ -67,7 +67,7 @@ var securityRules = []*Rule{
 			Confidence: 0.6,
 		},
 		Matcher: matchFunc(func(f *model.File) []model.Match {
-			return matchRegexes(f, discRes, 2)
+			return matchCodeRegexes(f, discRes, 2)
 		}),
 	},
 	{
@@ -82,7 +82,7 @@ var securityRules = []*Rule{
 			Confidence: 0.4,
 		},
 		Matcher: matchFunc(func(f *model.File) []model.Match {
-			return matchRegexes(f, logInjRes, 2)
+			return matchCodeRegexes(f, logInjRes, 2)
 		}),
 	},
 	{
@@ -125,7 +125,7 @@ var (
 	}
 	discRes = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\bdebug\s*[:=]\s*(true|True)\b`),
-		regexp.MustCompile(`net/http/pprof`),
+		regexp.MustCompile(`["']net/http/pprof["']`),
 		regexp.MustCompile(`(?i)(err|error|exception)\.(stack|StackTrace)\b`),
 	}
 	logInjRes = []*regexp.Regexp{
@@ -142,7 +142,7 @@ func matchStatThenOpen(f *model.File) []model.Match {
 	const window = 5
 	var matches []model.Match
 	for i, line := range f.Lines {
-		if !statRes.MatchString(line) {
+		if isCommentLine(f.Language, line) || !statRes.MatchString(line) {
 			continue
 		}
 		hi := i + window
@@ -150,7 +150,7 @@ func matchStatThenOpen(f *model.File) []model.Match {
 			hi = len(f.Lines) - 1
 		}
 		for j := i + 1; j <= hi; j++ {
-			if strings.Contains(f.Lines[j], "Defer") {
+			if isCommentLine(f.Language, f.Lines[j]) || strings.Contains(f.Lines[j], "Defer") {
 				continue
 			}
 			if openRes.MatchString(f.Lines[j]) {

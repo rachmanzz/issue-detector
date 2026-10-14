@@ -268,6 +268,7 @@ var ghaSHARe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 var (
 	dockerLatestRe = regexp.MustCompile(`(?i)^FROM\s+\S+`)
+	dockerFromRe   = regexp.MustCompile(`(?i)^FROM\s+(\S+)`)
 	dockerUserRe   = regexp.MustCompile(`(?i)^\s*USER\s+(\S+)`)
 	dockerAddRe    = regexp.MustCompile(`(?i)^\s*ADD\s+https?://`)
 	dockerPipeRe   = regexp.MustCompile(`(?i)^\s*RUN\s+.*(curl|wget)\b[^|]*\|\s*(sh|bash)\b`)
@@ -275,14 +276,25 @@ var (
 	yingCommentRe  = regexp.MustCompile(`^\s*#`)
 )
 
+// isNonRootBase reports whether a base image reference is known to run as a
+// non-root user by default (distroless/ubuntu `:nonroot`, `-unprivileged`).
+func isNonRootBase(image string) bool {
+	img := strings.ToLower(image)
+	return strings.Contains(img, "nonroot") || strings.Contains(img, "unprivileged")
+}
+
 func scanDockerfile(rel, content string) []model.Finding {
 	var out []model.Finding
 	hasUser := false
 	firstU := 0
+	lastBase := ""
 	for i, raw := range linesOf(content) {
 		line := strings.TrimSpace(raw)
 		if line == "" || yingCommentRe.MatchString(line) {
 			continue
+		}
+		if m := dockerFromRe.FindStringSubmatch(line); m != nil {
+			lastBase = m[1]
 		}
 		if m := dockerUserRe.FindStringSubmatch(line); m != nil {
 			hasUser = true
@@ -311,7 +323,9 @@ func scanDockerfile(rel, content string) []model.Finding {
 				"Gunakan BuildKit secrets (`--mount=type=secret`) atau runtime env.", rel, i+1, 0.7))
 		}
 	}
-	if !hasUser {
+	// A non-root base image (e.g. distroless `:nonroot` / `-unprivileged`) already
+	// runs as an unprivileged user, so the missing USER instruction is not a risk.
+	if !hasUser && !isNonRootBase(lastBase) {
 		out = append(out, finding("POSTURE-002", model.SeverityLow,
 			"Container tidak menetapkan USER", "Tanpa instruksi USER, container berjalan sebagai root.",
 			"Tambahkan `USER` non-root.", rel, 1, 0.5))

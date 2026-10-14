@@ -119,7 +119,7 @@ var builtinRules = []*Rule{
 			Confidence: 0.6,
 		},
 		Matcher: matchFunc(func(f *model.File) []model.Match {
-			return matchRegexLines(f, debugOutRe[f.Language], 1)
+			return matchCodeRegexLines(f, debugOutRe[f.Language], 1)
 		}),
 	},
 }
@@ -135,14 +135,36 @@ func matchRegexLines(f *model.File, re *regexp.Regexp, maxPerFile int) []model.M
 	return matchRegexes(f, []*regexp.Regexp{re}, maxPerFile)
 }
 
+// matchCodeRegexLines is matchRegexLines for code-construct patterns: it ignores
+// comment-only lines so a documented example (e.g. a rule's own commented
+// `exec.Command("sh", "-c", …)`) is not reported as a live finding.
+func matchCodeRegexLines(f *model.File, re *regexp.Regexp, maxPerFile int) []model.Match {
+	return matchCodeRegexes(f, []*regexp.Regexp{re}, maxPerFile)
+}
+
 // matchRegexes returns the first matching line for each distinct line across all
-// patterns (deduplicated, capped at maxPerFile).
+// patterns (deduplicated, capped at maxPerFile). Comments are matched, so use it
+// for value patterns (secrets) where a hit inside a comment is still meaningful.
 func matchRegexes(f *model.File, res []*regexp.Regexp, maxPerFile int) []model.Match {
+	return matchRegexesFiltered(f, res, maxPerFile, false)
+}
+
+// matchCodeRegexes is matchRegexes for code-construct patterns (injection, perms,
+// weak crypto, TOCTOU, debug output, …): comment-only lines are skipped (roast:
+// rules must not match their own documentation).
+func matchCodeRegexes(f *model.File, res []*regexp.Regexp, maxPerFile int) []model.Match {
+	return matchRegexesFiltered(f, res, maxPerFile, true)
+}
+
+func matchRegexesFiltered(f *model.File, res []*regexp.Regexp, maxPerFile int, skipComments bool) []model.Match {
 	var matches []model.Match
 	seen := map[int]bool{}
 	for i, text := range f.Lines {
 		lineNo := i + 1
 		if seen[lineNo] {
+			continue
+		}
+		if skipComments && isCommentLine(f.Language, text) {
 			continue
 		}
 		for _, re := range res {
@@ -158,6 +180,23 @@ func matchRegexes(f *model.File, res []*regexp.Regexp, maxPerFile int) []model.M
 		}
 	}
 	return matches
+}
+
+// commentMarkers returns the line-comment prefixes for a language.
+func isCommentLine(lang model.Language, line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" {
+		return false
+	}
+	switch lang {
+	case model.LanguagePython:
+		return strings.HasPrefix(t, "#")
+	case model.LanguageGo, model.LanguageJavaScript, model.LanguageTypeScript:
+		return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*")
+	default:
+		return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "#") ||
+			strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*")
+	}
 }
 
 // snippetAt returns the trimmed source line, or "" when out of range.
