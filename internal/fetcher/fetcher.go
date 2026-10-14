@@ -66,83 +66,129 @@ func Fetch(ctx context.Context, opts Options) (string, func(), error) {
 }
 
 // Enumerate walks root and returns candidate files sorted by RelPath.
-// Honored ignore sources: <root>/.issue-detectorignore, <root>/.gitignore,
-// plus Options.Ignore patterns.
+// Honored ignore sources: <root>/.issue-detectorignore, <root>/.gitignore (and
+// nested .gitignore files), plus Options.Ignore patterns. All patterns are kept
+// in one ordered list per directory so .gitignore negation ("!pattern") and
+// last-match-wins semantics work exactly as in git.
 func Enumerate(root string, opts Options) ([]Entry, error) {
-	patterns := make([]string, 0, len(opts.Ignore)+16)
-	patterns = append(patterns, opts.Ignore...)
-	for _, name := range []string{".issue-detectorignore", ".gitignore"} {
-		if data, err := os.ReadFile(filepath.Join(root, name)); err == nil {
-			patterns = append(patterns, strings.Split(string(data), "\n")...)
-		}
+	rootLines := loadIgnoreLines(root)
+	rootLines = append(rootLines, opts.Ignore...)
+	stack := newIgnoreStack()
+	if len(rootLines) > 0 {
+		stack = stack.push("", gitignore.CompileIgnoreLines(rootLines...))
 	}
-	matchers := compileIgnores(patterns)
-	ign := &ignoreMatchers{matchers}
 
 	var out []Entry
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == root {
-			return nil
-		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
-		}
-		rel = filepath.ToSlash(rel)
-		if d.IsDir() {
-			if DefaultIgnoreDirs[strings.ToLower(d.Name())] || ign.match(rel+"/") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if ign.match(rel) {
-			return nil
-		}
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return infoErr
-		}
-		out = append(out, Entry{Path: path, RelPath: rel, Size: info.Size()})
-		return nil
-	})
-	if err != nil {
+	if err := walkDir(root, "", stack, &out); err != nil {
 		return nil, err
 	}
-
 	sort.Slice(out, func(i, j int) bool { return out[i].RelPath < out[j].RelPath })
 	return out, nil
 }
 
-type ignoreMatchers struct{ ms []*gitignore.GitIgnore }
-
-func (im *ignoreMatchers) match(rel string) bool {
-	if im == nil {
-		return false
+// walkDir recurses from absRoot/relDir, carrying the stack of per-directory
+// ignore matchers (root first) so nested .gitignore files apply to their subtree.
+func walkDir(absRoot, relDir string, stack ignoreStack, out *[]Entry) error {
+	dir := absRoot
+	if relDir != "" {
+		dir = filepath.Join(absRoot, filepath.FromSlash(relDir))
 	}
-	for _, m := range im.ms {
-		if m.MatchesPath(rel) {
-			return true
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, de := range entries {
+		rel := de.Name()
+		if relDir != "" {
+			rel = relDir + "/" + de.Name()
 		}
-	}
-	return false
-}
-
-// compileIgnores builds matchers for the user-supplied ignore patterns.
-func compileIgnores(patterns []string) []*gitignore.GitIgnore {
-	if len(patterns) == 0 {
-		return nil
-	}
-	out := make([]*gitignore.GitIgnore, 0, len(patterns))
-	for _, p := range patterns {
-		if strings.TrimSpace(p) == "" {
+		if de.IsDir() {
+			if DefaultIgnoreDirs[strings.ToLower(de.Name())] || stack.ignored(rel+"/") {
+				continue
+			}
+			child := stack
+			if lines := loadIgnoreFile(filepath.Join(dir, de.Name(), ".gitignore")); len(lines) > 0 {
+				child = stack.push(rel, gitignore.CompileIgnoreLines(lines...))
+			}
+			if err := walkDir(absRoot, rel, child, out); err != nil {
+				return err
+			}
 			continue
 		}
-		out = append(out, gitignore.CompileIgnoreLines(p))
+		if stack.ignored(rel) {
+			continue
+		}
+		info, ierr := de.Info()
+		if ierr != nil {
+			return ierr
+		}
+		*out = append(*out, Entry{Path: filepath.Join(dir, de.Name()), RelPath: rel, Size: info.Size()})
+	}
+	return nil
+}
+
+// loadIgnoreLines returns the root .issue-detectorignore + .gitignore lines,
+// cleaned of CR and trailing spaces.
+func loadIgnoreLines(root string) []string {
+	var lines []string
+	for _, name := range []string{".issue-detectorignore", ".gitignore"} {
+		lines = append(lines, loadIgnoreFile(filepath.Join(root, name))...)
+	}
+	return lines
+}
+
+// loadIgnoreFile reads an ignore file and returns trimmed, non-empty lines.
+func loadIgnoreFile(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	raw := strings.Split(string(data), "\n")
+	out := make([]string, 0, len(raw))
+	for _, l := range raw {
+		l = strings.TrimRight(l, "\r")
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		out = append(out, l)
 	}
 	return out
+}
+
+// ignoreStack is the chain of ignore matchers from the scan root down to a
+// directory. Deeper matchers override shallower ones (git semantics).
+type ignoreStack []levelMatcher
+
+type levelMatcher struct {
+	dir string // slash-relative dir from root ("" = root)
+	gi  *gitignore.GitIgnore
+}
+
+func newIgnoreStack() ignoreStack { return ignoreStack{} }
+
+func (s ignoreStack) push(dir string, gi *gitignore.GitIgnore) ignoreStack {
+	next := make(ignoreStack, len(s), len(s)+1)
+	copy(next, s)
+	return append(next, levelMatcher{dir: dir, gi: gi})
+}
+
+// ignored reports whether rel is ignored, letting the deepest level that has an
+// opinion decide (so a nested negation can re-include a file).
+func (s ignoreStack) ignored(rel string) bool {
+	ignored := false
+	for _, lv := range s {
+		sub := rel
+		if lv.dir != "" {
+			if !strings.HasPrefix(rel, lv.dir+"/") {
+				continue
+			}
+			sub = rel[len(lv.dir)+1:]
+		}
+		if m, pat := lv.gi.MatchesPathHow(sub); pat != nil || m {
+			ignored = m
+		}
+	}
+	return ignored
 }
 
 func cloneRemote(ctx context.Context, url, cacheRoot string) (string, error) {
