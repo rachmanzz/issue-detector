@@ -36,6 +36,7 @@ func newScanCmd() *cobra.Command {
 		categories  string
 		severityMin string
 		failOn      string
+		aiGate      bool
 		cfgPath     string
 		remote      string
 		jobs        int
@@ -436,7 +437,7 @@ func newScanCmd() *cobra.Command {
 				return srv.Listen("127.0.0.1", webPort)
 			}
 
-			if code := report.ExitFor(res, gate); code != report.ExitOK {
+			if code := report.ExitFor(res, gate, aiGate); code != report.ExitOK {
 				return exit(code)
 			}
 			return nil
@@ -449,6 +450,7 @@ func newScanCmd() *cobra.Command {
 	fl.StringVar(&categories, "categories", "", "kategori dipisah koma (default semua)")
 	fl.StringVar(&severityMin, "severity-min", "", "severity minimum dilaporkan: low|medium|high|critical")
 	fl.StringVar(&failOn, "fail-on", "", "gate exit code: none|low|medium|high|critical")
+	fl.BoolVar(&aiGate, "ai-gate", false, "ikutkan temuan AI (source=ai) ke gate --fail-on (default: advisory)")
 	fl.StringVar(&cfgPath, "config", "", "path config YAML/JSON (default <root>/issue-detector.yaml|.yml|.json)")
 	fl.StringVar(&remote, "remote", "", "clone git URL terlebih dahulu, scan di cache dir (root dipakai sebagai cache dir)")
 	fl.IntVar(&jobs, "jobs", 0, "jumlah worker (default NumCPU)")

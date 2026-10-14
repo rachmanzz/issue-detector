@@ -70,6 +70,7 @@ Contoh:
 | `--categories` | semua | filter kategori temuan |
 | `--severity-min` | `info` | ambang minimal severity |
 | `--fail-on` | `none` | exit code 1 jika ada severity ≥ ambang |
+| `--ai-gate` | `false` | ikutkan temuan AI (`source: ai`) ke gate `--fail-on` (default: advisory) |
 | `--config` | `issue-detector.yaml` | path config YAML (`.yml` juga auto-detect) |
 | `--jobs` | `NumCPU` | worker paralel |
 | `--sub-worker-limit` | 0 (`5`) | fan-out sub-worker per file |
@@ -156,7 +157,7 @@ OPENAI_API_KEY=... issue-detector scan . --ai --ai-provider openai --ai-model gp
 
 ### AI (Mode B)
 
-Enrichment hanya untuk temuan **high/critical**; temuan AI (`source: ai`) dikecualikan dari `--fail-on`, dan secret diredaksi sebelum dikirim. Konfigurasi bisa lewat flag CLI atau `issue-detector.yaml` (flag menimpa YAML):
+Enrichment hanya untuk temuan **high/critical**; temuan AI (`source: ai`) secara default **advisory** (dikecualikan dari `--fail-on`) — pakai `--ai-gate` untuk mengikutkannya ke gate, dan secret diredaksi sebelum dikirim. Konfigurasi bisa lewat flag CLI atau `issue-detector.yaml` (flag menimpa YAML):
 
 ```yaml
 ai:

@@ -77,20 +77,36 @@ func TestWriteTextAISection(t *testing.T) {
 func TestExitFor(t *testing.T) {
 	res := sampleResult()
 
-	if got := ExitFor(res, model.SeverityInfo); got != ExitOK {
+	if got := ExitFor(res, model.SeverityInfo, false); got != ExitOK {
 		t.Errorf("fail-on none -> exit %d, want 0", got)
 	}
-	if got := ExitFor(res, model.SeverityHigh); got != ExitFindings {
+	if got := ExitFor(res, model.SeverityHigh, false); got != ExitFindings {
 		t.Errorf("fail-on high -> exit %d, want 1", got)
 	}
-	if got := ExitFor(res, model.SeverityCritical); got != ExitOK {
+	if got := ExitFor(res, model.SeverityCritical, false); got != ExitOK {
 		t.Errorf("fail-on critical (only high present) -> exit %d, want 0", got)
 	}
 
 	clean := sampleResult()
 	clean.Findings = nil
-	if got := ExitFor(clean, model.SeverityLow); got != ExitOK {
+	if got := ExitFor(clean, model.SeverityLow, false); got != ExitOK {
 		t.Errorf("no findings -> exit %d, want 0", got)
+	}
+}
+
+// TestExitForAIGate verifies AI findings are advisory by default but gate the
+// exit code when includeAI is set.
+func TestExitForAIGate(t *testing.T) {
+	res := sampleResult()
+	res.Findings = []model.Finding{{
+		Category: model.CategorySecurity, Severity: model.SeverityHigh,
+		Title: "AI secret", File: "a.go", Line: 1, Source: model.SourceAI,
+	}}
+	if got := ExitFor(res, model.SeverityHigh, false); got != ExitOK {
+		t.Errorf("AI advisory by default -> exit %d, want 0", got)
+	}
+	if got := ExitFor(res, model.SeverityHigh, true); got != ExitFindings {
+		t.Errorf("--ai-gate high -> exit %d, want 1", got)
 	}
 }
 

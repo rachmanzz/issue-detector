@@ -92,15 +92,15 @@ func WriteText(w io.Writer, res *model.ScanResult) error {
 }
 
 // ExitFor computes the process exit code from a report per the fail-on gate.
-// failOn is one of: none, low, medium, high, critical.
-func ExitFor(res *model.ScanResult, failOn model.Severity) int {
+// failOn is one of: none, low, medium, high, critical. AI-sourced findings are
+// advisory and excluded unless includeAI is set (opt-in gate, PRD §3.5).
+func ExitFor(res *model.ScanResult, failOn model.Severity, includeAI bool) int {
 	if failOn == "" || failOn == model.SeverityInfo {
 		return ExitOK
 	}
 	threshold := model.SeverityWeight[failOn]
 	for _, f := range res.Findings {
-		// AI-sourced findings are advisory and excluded from the gate (PRD §3.5).
-		if f.Source == model.SourceAI {
+		if f.Source == model.SourceAI && !includeAI {
 			continue
 		}
 		if model.SeverityWeight[f.Severity] >= threshold {
