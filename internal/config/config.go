@@ -300,6 +300,26 @@ func GlobalPath(elem ...string) (string, error) {
 	return filepath.Join(append([]string{d}, elem...)...), nil
 }
 
+// StatePath resolves a configured state location (e.g. ai.cache_dir, cache.path)
+// so it never points into the scanned project: an absolute path is used as-is;
+// an empty path uses def; a relative path is anchored under the per-user global
+// dir — NOT the current working directory. If the home dir is unavailable it
+// falls back to the OS temp dir, never the CWD (PRD §7.1).
+func StatePath(configured, def string) string {
+	if configured != "" && filepath.IsAbs(configured) {
+		return configured
+	}
+	base, err := GlobalDir()
+	if err != nil {
+		base = filepath.Join(os.TempDir(), "issues_detector")
+	}
+	name := configured
+	if name == "" {
+		name = def
+	}
+	return filepath.Join(base, name)
+}
+
 // MergeCache overlays cache settings: non-nil/non-empty overlay fields win.
 func MergeCache(base, overlay CacheConfig) CacheConfig {
 	if overlay.Enabled != nil {

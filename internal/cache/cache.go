@@ -563,7 +563,16 @@ func resolveDir(o Options) (string, error) {
 		return p, nil
 	}
 	if p := strings.TrimSpace(o.Path); p != "" {
-		return p, nil
+		// A relative custom path is anchored under the per-user dir, never the
+		// CWD, so the cache cannot land inside the scanned project (PRD §7.1).
+		if filepath.IsAbs(p) {
+			return p, nil
+		}
+		g, gerr := globalDir(o.Home)
+		if gerr != nil {
+			return "", gerr
+		}
+		return filepath.Join(g, p), nil
 	}
 	switch strings.ToLower(strings.TrimSpace(o.Mode)) {
 	case "global", "auto", "":

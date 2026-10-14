@@ -409,3 +409,34 @@ func TestProjectBlankAIFieldsInheritGlobal(t *testing.T) {
 		t.Fatalf("blank project ai fields must inherit global: %+v", cfg.AI)
 	}
 }
+
+// TestStatePath guards that configured state locations never resolve to the CWD
+// (which would write cache into the scanned project): relative paths anchor
+// under the per-user dir, absolute paths pass through, and a missing home dir
+// falls back to the OS temp dir.
+func TestStatePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ISSUE_DETECTOR_HOME", home)
+	gdir := filepath.Join(home, ".issues_detector")
+
+	if got := StatePath("/abs/x", "def"); got != "/abs/x" {
+		t.Errorf("absolute must pass through, got %q", got)
+	}
+	if got := StatePath("", "ai-cache"); got != filepath.Join(gdir, "ai-cache") {
+		t.Errorf("empty -> global default, got %q", got)
+	}
+	if got := StatePath(".rel", "ai-cache"); got != filepath.Join(gdir, ".rel") {
+		t.Errorf("relative must anchor under global dir, got %q", got)
+	}
+
+	// Home unavailable -> temp dir, never CWD.
+	t.Setenv("ISSUE_DETECTOR_HOME", "")
+	t.Setenv("HOME", "")
+	got := StatePath("rel", "def")
+	if !filepath.IsAbs(got) || filepath.Dir(got) == "." {
+		t.Errorf("fallback must be absolute (temp), got %q", got)
+	}
+	if got != filepath.Join(os.TempDir(), "issues_detector", "rel") {
+		t.Errorf("fallback should be under temp, got %q", got)
+	}
+}

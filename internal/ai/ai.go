@@ -54,15 +54,10 @@ func New(cfg Config) (*Enricher, error) {
 	if cfg.BudgetTokens <= 0 {
 		cfg.BudgetTokens = 100000
 	}
-	if cfg.CacheDir == "" {
-		// Default to the per-user dir so nothing is written into the scanned
-		// project. Falls back to a local name if the home dir is unavailable.
-		if p, err := config.GlobalPath("ai-cache"); err == nil {
-			cfg.CacheDir = p
-		} else {
-			cfg.CacheDir = ".issue-detector-cache"
-		}
-	}
+	// Anchor the AI cache under the per-user dir so a relative cache_dir can
+	// never write into the scanned project (PRD §7.1). StatePath resolves
+	// relative paths against ~/.issues_detector, not the CWD.
+	cfg.CacheDir = config.StatePath(cfg.CacheDir, "ai-cache")
 	if cfg.Model == "" {
 		if cfg.BaseURL != "" {
 			return nil, fmt.Errorf("ai: model wajib diisi saat memakai base_url (server OpenAI-compatible apa pun)")

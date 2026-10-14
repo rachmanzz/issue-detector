@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -54,6 +55,30 @@ func TestParseEnrich(t *testing.T) {
 	// Absent confidence stays absent (nil), not coerced.
 	if out, err := parseEnrich(`{"explanation":"x"}`); err != nil || out.Confidence != nil {
 		t.Errorf("absent confidence should be nil: %+v err=%v", out, err)
+	}
+}
+
+// TestAICacheDirNeverWritesIntoProject guards that a relative ai.cache_dir is
+// anchored under the per-user dir, never the scanned project (PRD §7.1).
+func TestAICacheDirNeverWritesIntoProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ISSUE_DETECTOR_HOME", home)
+	project := t.TempDir()
+	t.Chdir(project)
+
+	e, err := New(Config{Provider: "openai", Model: "m", BaseURL: "http://127.0.0.1:1", APIKey: "k", CacheDir: ".issue-detector-cache"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.cache.put("k", enrichOut{Explanation: "x"})
+	e.cache.save()
+
+	if _, err := os.Stat(filepath.Join(project, ".issue-detector-cache")); !os.IsNotExist(err) {
+		t.Errorf("cache must not be written into the scanned project (err=%v)", err)
+	}
+	want := filepath.Join(home, ".issues_detector", ".issue-detector-cache", "ai-cache.json")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("cache should live under the global dir: %v", err)
 	}
 }
 

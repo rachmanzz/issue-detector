@@ -465,3 +465,17 @@ func fileHash(files []UncommitFile, name string) string {
 	}
 	return ""
 }
+
+// TestCachePathRelativeAnchoredToGlobal guards that a relative cache.path is
+// anchored under the per-user cache dir, never the CWD/scanned project.
+func TestCachePathRelativeAnchoredToGlobal(t *testing.T) {
+	home := t.TempDir()
+	got, err := resolveDir(Options{Mode: "global", Home: home, Path: "reldir"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".issues_detector", "cache", "reldir")
+	if got != want {
+		t.Errorf("relative cache.path must anchor under global cache dir: got %q want %q", got, want)
+	}
+}
