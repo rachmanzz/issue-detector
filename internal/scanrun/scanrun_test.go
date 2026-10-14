@@ -117,6 +117,23 @@ func TestAIResultNotCachedButRegisters(t *testing.T) {
 	}
 }
 
+// TestIncompleteScanNotRegistered: an incomplete scan (AI detector failure) must
+// not advance the ledger, so the next run retries instead of skipping.
+func TestIncompleteScanNotRegistered(t *testing.T) {
+	t.Setenv("ISSUE_DETECTOR_CACHE_DIR", t.TempDir())
+	ctx := context.Background()
+	root := t.TempDir()
+
+	opts := baseOpts(root)
+	opts.AIOnly = true
+	p := Prepare(ctx, opts)
+	p.Result(&model.ScanResult{ScanID: "partial", Incomplete: true})
+
+	if _, has, _ := p.Store().LastItem(root); has {
+		t.Errorf("incomplete scan must not advance the ledger")
+	}
+}
+
 // TestNoCacheDisablesStore: --no-cache must leave the store closed.
 func TestNoCacheDisablesStore(t *testing.T) {
 	t.Setenv("ISSUE_DETECTOR_CACHE_DIR", t.TempDir())

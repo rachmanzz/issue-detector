@@ -210,6 +210,12 @@ type ScanResult struct {
 	// AISummary is the optional narrative produced by AI-detector mode
 	// (--ai-only, PRD §3.2). Empty for deterministic-only scans.
 	AISummary string `json:"ai_summary,omitempty"`
+	// Incomplete marks a result that must not be recorded as a fully-checked
+	// scan (e.g. the AI detector failed on one or more chunks). The CLI still
+	// reports the partial result, but the session ledger is not advanced so the
+	// next run retries instead of silently skipping unchanged files. Not part of
+	// the wire schema.
+	Incomplete bool `json:"-"`
 }
 
 // LineRange is an inclusive 1-based line range (used for partial AI payloads).

@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/rachmanzz/issue-detector/internal/config"
@@ -119,6 +120,22 @@ func TestScanAIOnlyDropsCosmetic(t *testing.T) {
 	}
 	if len(res.Findings) != 1 || res.Findings[0].Title != "real" {
 		t.Fatalf("cosmetic finding must be dropped, got %+v", res.Findings)
+	}
+}
+
+// TestScanAIOnlyIncompleteOnDetectorError guards that a detector failure marks
+// the result Incomplete (so the caller does not advance the session ledger).
+func TestScanAIOnlyIncompleteOnDetectorError(t *testing.T) {
+	dir := writeFixture(t)
+	cfg := config.Default()
+	cfg.NoGit = true
+	det := &stubDetector{err: errors.New("boom")}
+	res, err := Scan(context.Background(), Options{Root: dir, Config: cfg, AIOnly: true, Detector: det})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Incomplete {
+		t.Errorf("detector error must set Incomplete=true")
 	}
 }
 
