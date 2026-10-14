@@ -7,8 +7,10 @@ SemVer. `schema_version` laporan JSON = kontrak output (lihat `internal/version`
 
 ### Changed
 - Migrasi dependency worker/queue dari `github.com/rachmanzz/fiber-extras/v3/*`
-  ke **`github.com/rachmanzz/gosuite/v3/{worker,queue}` v0.2.2** (monorepo
-  multi-modul pengganti; package framework-agnostic).
+  ke **`github.com/rachmanzz/gosuite/v3/{worker,queue}` v0.2.3** (monorepo
+  multi-modul pengganti; package framework-agnostic). v0.2.3 membuat
+  `subWorkerPool.Wait()` idempoten (`sync.Once`), menghilangkan galat palsu
+  `context canceled` yang memicu retry + DLQ pada scan queue.
 - Scanner: queue kini **proses-level, didaftarkan sekali**. Handler tunggal
   `handleScanFile` (didaftarkan tepat sekali di router yang dibuat lewat
   `getQueue`) **tidak terikat** ke scan mana pun — ia resolve `*Scanner` dari
@@ -23,6 +25,11 @@ SemVer. `schema_version` laporan JSON = kontrak output (lihat `internal/version`
 - Golden test untuk kontrak report JSON & SARIF (`internal/report/testdata`).
 - Fuzz target: `internal/parser`, `internal/delta`, `internal/pack`.
 - `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `Dockerfile`.
+- Flag `--no-ai`: matikan AI (menang atas `--ai` dan `ai.enabled` dari config
+  project/global), untuk memaksa scan rule-only.
+- Flag `--since N`: re-scan perubahan `N` commit terakhir (basis `HEAD~N`,
+  otomatis abaikan cache) — bentuk ringkas dari `--base HEAD~N --force`, mis.
+  untuk memaksa scan AI-only mundur lebih jauh dari commit terakhir yang dicek.
 - Supply chain: semua GitHub Action di-pin ke commit SHA (`supply-chain.yml`
   mem-verifikasi ini di CI); workflow `release.yml` membuat binary multi-OS,
   SBOM, checksum, dan **build provenance bertanda-tangan** (keyless).
@@ -40,3 +47,11 @@ SemVer. `schema_version` laporan JSON = kontrak output (lihat `internal/version`
 - `cache`: path state AI/sesi relatif di-anchor ke `~/.issues_detector`
   (tidak lagi ditulis ke repo yang dipindai).
 - Self-scan baseline dipulihkan (CI self-scan hijau kembali).
+- `rules`: matcher pola-kode (`SEC-INJ/PERM/CRYPTO/DISC/LOG`, TOCTOU, `DBG`)
+  kini mengabaikan baris komentar, sehingga rule tidak lagi cocok dengan contoh
+  di komentarnya sendiri; pola pprof `SEC-DISC` mewajibkan kutip agar tidak
+  cocok dengan literal raw-string milik rule sendiri.
+- `posture`: `POSTURE-002` tidak lagi dilaporkan bila base image sudah non-root
+  (distroless `:nonroot` / `-unprivileged`).
+- Self-scan repo ini (test di-skip): temuan 63 → 14, dua rule self-match dan
+  false positive Dockerfile hilang.

@@ -47,6 +47,7 @@ func newScanCmd() *cobra.Command {
 		quiet          bool
 		ignore         []string
 		baseRef        string
+		since          int
 		diffFile       string
 		noGit          bool
 		rulesPath      []string
@@ -128,6 +129,21 @@ func newScanCmd() *cobra.Command {
 			}
 			if diffFile == "" {
 				diffFile = cfg.Diff
+			}
+			// --since N re-scans changes over the last N commits by pinning an
+			// explicit delta base at HEAD~N and forcing a fresh run (bypassing
+			// the cached result). It is the ergonomic form of `--base HEAD~N
+			// --force`, e.g. to re-run an AI-only scan further back than the
+			// last checked commit.
+			if since > 0 {
+				if baseRef != "" {
+					return fmt.Errorf("--since tidak bisa digabung dengan --base")
+				}
+				if diffFile != "" {
+					return fmt.Errorf("--since tidak bisa digabung dengan --diff")
+				}
+				baseRef = fmt.Sprintf("HEAD~%d", since)
+				force = true
 			}
 
 			// filter: config dulu, lalu override flag.
@@ -485,6 +501,7 @@ func newScanCmd() *cobra.Command {
 	fl.BoolVarP(&quiet, "quiet", "q", false, "minimalkan log ke stderr")
 	fl.StringArrayVar(&ignore, "ignore", nil, "pola ignore tambahan (globs)")
 	fl.StringVar(&baseRef, "base", "", "delta scan: hanya baris berubah sejak ref (branch/tag/commit)")
+	fl.IntVar(&since, "since", 0, "re-scan perubahan N commit terakhir (basis HEAD~N; abaikan cache)")
 	fl.StringVar(&diffFile, "diff", "", "delta scan: dari file patch (.diff/.patch)")
 	fl.BoolVar(&noGit, "no-git", false, "lewati analisis kesehatan git")
 	fl.StringArrayVar(&rulesPath, "rules", nil, "file/direktori rule YAML tambahan (PRD §8)")

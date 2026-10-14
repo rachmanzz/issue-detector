@@ -7,7 +7,7 @@ Detektor masalah kode untuk project kecil–menengah. Men-scan folder lokal atau
 - **Fetcher**: scan folder lokal, atau repo git remote via clone shallow (`go-git`); hormati `.gitignore`/`.issue-detectorignore` dan direktori umum yang di-ignore (`node_modules`, `vendor`, dll.).
 - **Pipeline paralel**: tiap file diproses sebagai task pada in-memory queue; eksekusi oleh worker engine, dengan fan-out per rule (sub-worker) dan priorititas (secret-like files lebih dulu). Render-an akhir aggregator bersifat deterministik (sort severity → file → line) dan idempoten vs retry queue.
 - **Rules**: registry + matcher line-based & AST (tree-sitter: Go/Python/JavaScript), plus rule kustom YAML.
-- **Config**: nilai bawaan, file `issue-detector.yaml` (atau `.yml`), dan override via flag CLI (flag hanya menimpa bila eksplisit di-set).
+- **Config**: nilai bawaan, file `issue-detector.yaml` (atau `.yml`/`.json`), dan override via flag CLI (flag hanya menimpa bila eksplisit di-set).
 - **Exit codes**: cocok untuk CI gate (0/1/2).
 - **CI**: GitHub Actions `govulncheck` otomatis di `push`/`PR`/weekly.
 
@@ -79,7 +79,10 @@ Contoh:
 | `--quiet` | false | hanya temuan (tanpa log engine) |
 | `--ignore` | – | pola ignore tambahan (bisa diulang) |
 | `--base` | – | delta scan: hanya baris berubah sejak ref git |
+| `--since` | – | re-scan perubahan `N` commit terakhir (basis `HEAD~N`; abaikan cache) |
 | `--diff` | – | delta scan: dari file patch (`.diff`/`.patch`) |
+| `--force` | false | paksa scan ulang: abaikan hasil cache (tetap refresh cache) |
+| `--no-cache` | false | jangan baca/tulis cache sesi (untuk CI paranoid) |
 | `--no-git` | false | lewati analisis kesehatan git |
 | `--rules` | `--` | file/direktori rule YAML tambahan (bisa diulang) |
 | `--baseline` | – | abaikan temuan yang sudah ada di file baseline |
@@ -89,6 +92,8 @@ Contoh:
 | `--adapter-sandbox` | `default` | sandbox adapter: `none` \| `default` \| `strict` |
 | `--no-adapters` | false | lewati adapter eksternal |
 | `--ai` | false | aktifkan AI enrichment (Mode B); butuh API key env |
+| `--ai-only` | false | mode AI-detector: AI cari isu sendiri, rule engine dilewati |
+| `--no-ai` | false | matikan AI (menang atas `--ai` dan `ai.enabled` config) |
 | `--ai-provider` | `openai` | provider AI: `openai` \| `gemini` |
 | `--ai-model` | – | nama model (default per provider) |
 | `--ai-max-findings` | 25 | maksimum temuan di-enrich |
@@ -172,7 +177,7 @@ ai:
   cache_dir: .issue-detector-cache
 ```
 
-> Urutan resolusi key: `api_key` (literal) → `api_key_env` (nama env) → `OPENAI_API_KEY`/`GEMINI_API_KEY`. `issue-detector.yaml`/`.yml` sudah masuk `.gitignore` — jangan pernah commit key.
+> Urutan resolusi key: `api_key` (literal) → `api_key_env` (nama env) → `OPENAI_API_KEY`/`GEMINI_API_KEY`. `issue-detector.yaml`/`.yml`/`.json` sudah masuk `.gitignore` — jangan pernah commit key.
 
 `provider: openai` berarti **protokol OpenAI-compatible** — cocok untuk Ollama, vLLM, LM Studio, llama.cpp, OpenRouter, Azure, dsb. `base_url` mengarah ke server mana pun; **tidak harus dari OpenAI**. Bila `base_url` diisi, `model` wajib disebut, dan **API key opsional** (server lokal biasanya tanpa key):
 
@@ -196,6 +201,21 @@ issue-detector ai test --provider openai --base-url http://localhost:11434/v1 --
 ```
 
 Saat `ai.enabled: true`, `scan` mencetak diagnostik ke stderr: `config dimuat … ai_enabled`, `AI enrichment kandidat_high_critical=N`, dan `enriched=N` — atau `ERROR AI enrichment gagal (endpoint/key?)` bila endpoint tak terjangkau (tetap tampil walau `--quiet`).
+
+### Scan incremental (AI)
+
+Saat scan AI dijalankan (`--ai-only` atau `ai.enabled: true`), cache sesi mencatat commit terakhir yang dicek, sehingga scan berikutnya **hanya memeriksa perubahan** — temuan lama tidak dipindai ulang. Untuk memaksa periksa ulang mundur beberapa commit:
+
+```sh
+# hanya perubahan sejak scan terakhir
+issue-detector scan . --ai-only
+
+# paksa periksa ulang sejak 3 commit ke belakang
+issue-detector scan . --ai-only --since 3
+
+# ekuivalen eksplisit (--since = --base HEAD~N + --force)
+issue-detector scan . --ai-only --base HEAD~3 --force
+```
 
 ### Plugin WASM
 
