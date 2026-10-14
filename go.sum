@@ -84,10 +84,10 @@ github.com/pjbgf/sha1cd v0.7.0/go.mod h1:pKR5Li+qTCo+ebqITZfwPlJGoCFCvSO00qxjbNt
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/rachmanzz/gosuite/v3/queue v0.2.2 h1:MzrBrBCPCLQva8OJy5QyRXbV7ZUgnkTWyN0PF1LFWP8=
-github.com/rachmanzz/gosuite/v3/queue v0.2.2/go.mod h1:jk12M3oCHT6dSsaKMr1M+a7xcDasSmsEhmfoe8nEeGI=
-github.com/rachmanzz/gosuite/v3/worker v0.2.2 h1:byi9Kspaudm7egWU0B4eQc96sgHI3bZVHC4034p2wHs=
-github.com/rachmanzz/gosuite/v3/worker v0.2.2/go.mod h1:lNAI6b0/ddCadISEX0oM+f+kgFoZOZe1DEJ8tGqoTWA=
+github.com/rachmanzz/gosuite/v3/queue v0.2.3 h1:Mx8MKygCztfhZSM3tENY8npyGqrLPbt0eL2czPfcVVY=
+github.com/rachmanzz/gosuite/v3/queue v0.2.3/go.mod h1:jk12M3oCHT6dSsaKMr1M+a7xcDasSmsEhmfoe8nEeGI=
+github.com/rachmanzz/gosuite/v3/worker v0.2.3 h1:x0xfprq+dM57g/n/pXlXiSKd+oMifznDGp1GxUFiXmk=
+github.com/rachmanzz/gosuite/v3/worker v0.2.3/go.mod h1:lNAI6b0/ddCadISEX0oM+f+kgFoZOZe1DEJ8tGqoTWA=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
