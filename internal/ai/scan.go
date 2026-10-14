@@ -23,13 +23,13 @@ const (
 
 // detectFinding is one issue as returned by the model.
 type detectFinding struct {
-	Line       int     `json:"line"`
-	Severity   string  `json:"severity"`
-	Category   string  `json:"category"`
-	Title      string  `json:"title"`
-	Message    string  `json:"message"`
-	Fix        string  `json:"fix"`
-	Confidence float64 `json:"confidence"`
+	Line       int      `json:"line"`
+	Severity   string   `json:"severity"`
+	Category   string   `json:"category"`
+	Title      string   `json:"title"`
+	Message    string   `json:"message"`
+	Fix        string   `json:"fix"`
+	Confidence *float64 `json:"confidence"`
 }
 
 type detectOut struct {
@@ -114,6 +114,9 @@ func (e *Enricher) Detect(ctx context.Context, files []model.AIFile) ([]model.Fi
 	if err != nil && lastErr == nil {
 		lastErr = err
 	}
+	// Persist the detector cache once per run instead of per chunk (avoids
+	// rewriting the whole JSON file for every file/chunk).
+	e.dcache.save()
 	return findings, summary, lastErr
 }
 
@@ -257,7 +260,7 @@ func scaleFindings(file model.AIFile, ch chunk, raw []detectFinding, remaining i
 			File:       file.RelPath,
 			Line:       line,
 			Snippet:    snippet,
-			Confidence: clamp01(df.Confidence),
+			Confidence: confOr(df.Confidence, 0.5),
 			Source:     model.SourceAI,
 		})
 	}
@@ -267,7 +270,7 @@ func scaleFindings(file model.AIFile, ch chunk, raw []detectFinding, remaining i
 func (e *Enricher) cachedDetect(ctx context.Context, file model.AIFile, ch chunk, prompt string) (detectOut, error) {
 	key := detectKey(e.cfg.Model, file.ID, ch.start, ch.text)
 	if raw, ok := e.dcache.get(key); ok {
-		return parseDetect(raw), nil
+		return parseDetect(raw)
 	}
 	// jsonMode: relay models otherwise answer with prose reasoning instead of
 	// the strict JSON the detector parses.
@@ -275,9 +278,14 @@ func (e *Enricher) cachedDetect(ctx context.Context, file model.AIFile, ch chunk
 	if err != nil {
 		return detectOut{}, err
 	}
+	out, perr := parseDetect(raw)
+	if perr != nil {
+		// Never cache an unparseable reply: it would masquerade as "no findings"
+		// forever. Surfacing the error keeps the scan Incomplete and retried.
+		return detectOut{}, perr
+	}
 	e.dcache.put(key, raw)
-	e.dcache.save()
-	return parseDetect(raw), nil
+	return out, nil
 }
 
 // summarize asks for a short narrative of the change set and findings. Failures
@@ -316,7 +324,6 @@ func (e *Enricher) summarize(ctx context.Context, files []model.AIFile, findings
 	}
 	txt := strings.TrimSpace(raw)
 	e.dcache.put(key, txt)
-	e.dcache.save()
 	return txt, nil
 }
 
@@ -371,7 +378,10 @@ func fileIDs(f model.AIFile) string {
 	return fmt.Sprintf(" %q", f.ID)
 }
 
-func parseDetect(raw string) detectOut {
+// parseDetect parses a detector reply. A non-JSON reply is an error, never an
+// empty (or prose) result: an unparseable answer means "not reviewed", not
+// "clean" — the caller must not advance the checked marker.
+func parseDetect(raw string) (detectOut, error) {
 	s := strings.TrimSpace(raw)
 	// Strip markdown fences if the model added them.
 	if i := strings.Index(s, "```"); i >= 0 {
@@ -388,9 +398,9 @@ func parseDetect(raw string) detectOut {
 	}
 	var out detectOut
 	if err := json.Unmarshal([]byte(s), &out); err != nil {
-		return detectOut{}
+		return detectOut{}, fmt.Errorf("ai: respons detektor bukan JSON valid: %w", err)
 	}
-	return out
+	return out, nil
 }
 
 func normalizeSeverity(s string) model.Severity {

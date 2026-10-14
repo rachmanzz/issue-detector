@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -39,13 +40,63 @@ func TestRedact(t *testing.T) {
 
 func TestParseEnrich(t *testing.T) {
 	raw := "here you go:\n```json\n{\"explanation\":\"x\",\"remediation\":\"y\",\"confidence\":0.8}\n```"
-	out := parseEnrich(raw)
-	if out.Explanation != "x" || out.Remediation != "y" || out.Confidence != 0.8 {
+	out, err := parseEnrich(raw)
+	if err != nil {
+		t.Fatalf("valid JSON should parse: %v", err)
+	}
+	if out.Explanation != "x" || out.Remediation != "y" || out.Confidence == nil || *out.Confidence != 0.8 {
 		t.Errorf("bad parse: %+v", out)
 	}
-	// Non-JSON falls back to the raw text.
-	if got := parseEnrich("plain text"); got.Explanation != "plain text" {
-		t.Errorf("fallback failed: %+v", got)
+	// Non-JSON is an error, not a prose "explanation".
+	if _, err := parseEnrich("plain text"); err == nil {
+		t.Errorf("non-JSON reply must be an error")
+	}
+	// Absent confidence stays absent (nil), not coerced.
+	if out, err := parseEnrich(`{"explanation":"x"}`); err != nil || out.Confidence != nil {
+		t.Errorf("absent confidence should be nil: %+v err=%v", out, err)
+	}
+}
+
+// TestConfOr guards that an explicit confidence of 0 is honored (not inflated)
+// and an absent field falls back to the default.
+func TestConfOr(t *testing.T) {
+	zero, over := 0.0, 1.5
+	if got := confOr(&zero, 0.5); got != 0 {
+		t.Errorf("explicit 0 must be honored, got %v", got)
+	}
+	if got := confOr(nil, 0.5); got != 0.5 {
+		t.Errorf("absent confidence -> default, got %v", got)
+	}
+	if got := confOr(&over, 0.5); got != 1 {
+		t.Errorf("confidence >1 must clamp to 1, got %v", got)
+	}
+}
+
+// TestCacheKeyIncludesLocation guards that two findings with identical
+// rule+snippet in different files do not share a cache entry.
+func TestCacheKeyIncludesLocation(t *testing.T) {
+	a := model.Finding{RuleID: "X-1", File: "a.go", Line: 1, Message: "m", Snippet: "s"}
+	b := model.Finding{RuleID: "X-1", File: "b.go", Line: 1, Message: "m", Snippet: "s"}
+	if cacheKey("m", a) == cacheKey("m", b) {
+		t.Errorf("cache key must include the finding's file/location")
+	}
+}
+
+// TestStrCacheBounded guards that the AI detect cache evicts oldest entries and
+// never exceeds its configured maximum.
+func TestStrCacheBounded(t *testing.T) {
+	c := &strCache{data: map[string]string{}, max: 3}
+	for i := 0; i < 5; i++ {
+		c.put(fmt.Sprintf("k%d", i), "v")
+	}
+	if len(c.data) != 3 {
+		t.Fatalf("cache must be bounded to 3, got %d", len(c.data))
+	}
+	if _, ok := c.data["k0"]; ok {
+		t.Errorf("oldest entry k0 should have been evicted")
+	}
+	if _, ok := c.data["k4"]; !ok {
+		t.Errorf("newest entry k4 must be present")
 	}
 }
 

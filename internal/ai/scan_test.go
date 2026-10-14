@@ -155,6 +155,8 @@ func TestDetectRequestFullRepush(t *testing.T) {
 	}
 }
 
+// TestDetectMalformedJSON verifies an unparseable detector reply surfaces an
+// error (so the scan is Incomplete and retried) and is NOT cached as success.
 func TestDetectMalformedJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -164,11 +166,18 @@ func TestDetectMalformedJSON(t *testing.T) {
 	defer srv.Close()
 	e, _ := New(Config{Provider: "openai", Model: "m", BaseURL: srv.URL, APIKey: "k", CacheDir: t.TempDir()})
 	findings, _, err := e.Detect(context.Background(), []model.AIFile{{RelPath: "a.go", Content: "a\nb"}})
-	if err != nil {
-		t.Fatalf("malformed JSON should not error: %v", err)
+	if err == nil {
+		t.Fatalf("malformed JSON must return an error, not silent success")
 	}
 	if len(findings) != 0 {
 		t.Fatalf("want 0 findings, got %d", len(findings))
+	}
+	// The summarize reply is plain text (cached under a "sum|" key) and that is
+	// fine; what must NOT be cached is the unparseable detect reply.
+	for k := range e.dcache.data {
+		if !strings.HasPrefix(k, "sum|") {
+			t.Errorf("unparseable detect reply must not be cached (key %q)", k)
+		}
 	}
 }
 
